@@ -1,0 +1,8 @@
+[tools]
+go = "1.26"
+"npm:tailwindcss" = "3.4"
+task = "3"
+
+[env]
+TOOLSHED_LOG_FORMAT = "text"
+TOOLSHED_DB_DSN = "postgres://toolshed:toolshed@localhost:5432/toolshed?sslmode=disable"

@@ -1,0 +1,35 @@
+# /etc/toolshed/server.yml — operator-edited at install time
+server:
+  bind: ":8080"
+  domain: "preview.example.com"
+  panel_host: "panel.preview.example.com"
+
+bootstrap_owner: "dominikpalatynski"
+
+github_app:
+  app_id: 123456
+  private_key_path: /etc/toolshed/private-key.pem
+  webhook_secret_path: /etc/toolshed/webhook-secret
+
+oauth:
+  client_id: "Iv1...."
+  client_secret_path: /etc/toolshed/oauth-secret
+
+acme:
+  email: "ops@example.com"
+  cloudflare_api_token_path: /etc/toolshed/cf-token
+
+defaults:
+  ttl: 72h
+  max_concurrent_per_repo: 2
+  cpu_limit: "2"
+  memory_limit: "2g"
+  pids_limit: 512
+
+db:
+  dsn: "postgres://toolshed:CHANGEME@postgres:5432/toolshed?sslmode=disable"
+
+log:
+  level: info
+  format: json
+  add_source: false

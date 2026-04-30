@@ -1,0 +1,119 @@
+version: "3"
+
+vars:
+  BIN_DIR: ./bin
+  TAILWIND: "{{.BIN_DIR}}/tailwindcss"
+  PKG: github.com/dominikpalatynski/toolshed
+
+tasks:
+  setup:
+    desc: One-time local setup (download Tailwind binary, mise install, go mod download)
+    cmds:
+      - mise install
+      - mkdir -p {{.BIN_DIR}}
+      - task: tools:tailwind
+      - go mod download
+
+  tools:tailwind:
+    status:
+      - test -x {{.TAILWIND}}
+    cmds:
+      - curl -sSL "https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.17/tailwindcss-{{OS}}-{{ARCH}}" -o {{.TAILWIND}}
+      - chmod +x {{.TAILWIND}}
+
+  generate:
+    desc: Run all codegen
+    deps: [generate:templ, generate:sqlc]
+
+  generate:templ:
+    sources: ["internal/web/templates/**/*.templ"]
+    generates: ["internal/web/templates/**/*_templ.go"]
+    cmds:
+      - go tool templ generate
+
+  generate:sqlc:
+    sources: ["internal/store/queries/*.sql", "migrations/*.sql", "sqlc.yaml"]
+    generates: ["internal/store/sqlc/**/*.go"]
+    cmds:
+      - go tool sqlc generate
+
+  tailwind:build:
+    sources:
+      - "internal/web/styles/input.css"
+      - "internal/web/templates/**/*.templ"
+      - "tailwind.config.js"
+    generates: ["internal/web/static/output.css"]
+    cmds:
+      - "{{.TAILWIND}} -i ./internal/web/styles/input.css -o ./internal/web/static/output.css --minify"
+
+  build:
+    desc: Build binary
+    deps: [generate, tailwind:build]
+    cmds:
+      - go build -o {{.BIN_DIR}}/toolshed ./cmd/toolshed
+
+  test:
+    desc: Full test suite (incl. testcontainers)
+    deps: [generate]
+    cmds:
+      - go tool gotestsum -- -race -count=1 ./...
+
+  test:short:
+    desc: Unit tests only (no testcontainers)
+    cmds:
+      - go test -short -race ./...
+
+  lint:
+    desc: golangci-lint full repo
+    deps: [generate]
+    cmds:
+      - go tool golangci-lint run
+
+  fmt:
+    desc: Format code
+    cmds:
+      - go tool gofumpt -w .
+      - go tool gci write -s standard -s default -s "prefix({{.PKG}})" .
+
+  dev:
+    desc: Live-reload dev loop (templ + tailwind + air in parallel)
+    deps: [generate, tailwind:build]
+    cmds:
+      - task: _dev:parallel
+
+  _dev:parallel:
+    internal: true
+    deps: [_dev:templ, _dev:tailwind, _dev:air]
+
+  _dev:templ:
+    cmds:
+      - go tool templ generate --watch --path ./internal/web/templates
+  _dev:tailwind:
+    cmds:
+      - "{{.TAILWIND}} -i ./internal/web/styles/input.css -o ./internal/web/static/output.css --watch"
+  _dev:air:
+    cmds:
+      - go tool air -c .air.toml
+
+  dev:up:
+    desc: Start local DB + riverui
+    cmds: ["docker compose -f compose.dev.yml up -d"]
+  dev:down:
+    cmds: ["docker compose -f compose.dev.yml down"]
+  dev:reset:
+    cmds:
+      - docker compose -f compose.dev.yml down -v
+      - task: dev:up
+      - sleep 2
+      - task: migrate:up
+
+  migrate:up:
+    cmds: ["go tool goose -dir ./migrations postgres \"$TOOLSHED_DB_DSN\" up"]
+  migrate:down:
+    cmds: ["go tool goose -dir ./migrations postgres \"$TOOLSHED_DB_DSN\" down"]
+  migrate:status:
+    cmds: ["go tool goose -dir ./migrations postgres \"$TOOLSHED_DB_DSN\" status"]
+  migrate:create:
+    desc: Create new migration file. Usage: task migrate:create -- add_user_role
+    cmds:
+      - "go tool goose -dir ./migrations -s create {{.CLI_ARGS}} sql"
