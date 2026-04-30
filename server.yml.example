@@ -27,7 +27,7 @@ defaults:
   pids_limit: 512
 
 db:
-  dsn: "postgres://toolshed:CHANGEME@postgres:5432/toolshed?sslmode=disable"
+  dsn: "postgres://toolshed:CHANGEME@postgres:5433/toolshed?sslmode=disable"
 
 log:
   level: info

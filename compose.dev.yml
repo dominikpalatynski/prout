@@ -5,21 +5,13 @@ services:
       POSTGRES_USER: toolshed
       POSTGRES_PASSWORD: toolshed
       POSTGRES_DB: toolshed
-    ports: ["5432:5432"]
+    ports: ["5433:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "toolshed"]
       interval: 2s
       timeout: 5s
       retries: 10
-
-  riverui:
-    image: ghcr.io/riverqueue/riverui:latest
-    environment:
-      DATABASE_URL: postgres://toolshed:toolshed@postgres:5432/toolshed?sslmode=disable
-    ports: ["8081:8080"]
-    depends_on:
-      postgres: { condition: service_healthy }
 
   # Uncomment from week 4 onward (ADR-005 testing path).
   # docker-socket-proxy:

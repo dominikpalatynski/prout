@@ -7,19 +7,44 @@ vars:
 
 tasks:
   setup:
-    desc: One-time local setup (download Tailwind binary, mise install, go mod download)
+    desc: One-time local setup (mise, Go tool deps, Tailwind binary, go mod tidy)
     cmds:
       - mise install
       - mkdir -p {{.BIN_DIR}}
+      - task: tools:install
       - task: tools:tailwind
-      - go mod download
+      - go mod tidy
+
+  tools:install:
+    desc: Add Go-based codegen/lint/dev tools to the module via `go get -tool`
+    cmds:
+      - go get -tool github.com/a-h/templ/cmd/templ@latest
+      - go get -tool github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+      - go get -tool github.com/pressly/goose/v3/cmd/goose@latest
+      - go get -tool github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+      - go get -tool mvdan.cc/gofumpt@latest
+      - go get -tool github.com/daixiang0/gci@latest
+      - go get -tool github.com/air-verse/air@latest
+      - go get -tool gotest.tools/gotestsum@latest
 
   tools:tailwind:
     status:
       - test -x {{.TAILWIND}}
     cmds:
-      - curl -sSL "https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.17/tailwindcss-{{OS}}-{{ARCH}}" -o {{.TAILWIND}}
-      - chmod +x {{.TAILWIND}}
+      - |
+        set -e
+        case "$(uname -s)" in
+          Darwin) os=macos ;;
+          Linux)  os=linux ;;
+          *) echo "unsupported OS: $(uname -s)"; exit 1 ;;
+        esac
+        case "$(uname -m)" in
+          arm64|aarch64) arch=arm64 ;;
+          x86_64|amd64)  arch=x64 ;;
+          *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
+        esac
+        curl -fsSL "https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.17/tailwindcss-${os}-${arch}" -o {{.TAILWIND}}
+        chmod +x {{.TAILWIND}}
 
   generate:
     desc: Run all codegen
@@ -114,6 +139,6 @@ tasks:
   migrate:status:
     cmds: ["go tool goose -dir ./migrations postgres \"$TOOLSHED_DB_DSN\" status"]
   migrate:create:
-    desc: Create new migration file. Usage: task migrate:create -- add_user_role
+    desc: "Create new migration file. Usage: task migrate:create -- add_user_role"
     cmds:
       - "go tool goose -dir ./migrations -s create {{.CLI_ARGS}} sql"
