@@ -9,5 +9,8 @@ func defaults() *Config {
 			Level:  "info",
 			Format: "json",
 		},
+		GitHub: GitHubConfig{
+			APIBaseURL: "https://api.github.com",
+		},
 	}
 }

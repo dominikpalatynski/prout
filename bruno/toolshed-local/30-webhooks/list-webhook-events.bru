@@ -1,0 +1,29 @@
+meta {
+  name: List Webhook Events
+  type: http
+  seq: 15
+}
+
+get {
+  url: {{baseUrl}}/api/webhook-events?limit={{webhookListLimit}}
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{operatorToken}}
+}
+
+script:post-response {
+  const body = res.getBody();
+  if (res.getStatus() === 200 && body.webhook_events && body.webhook_events.length > 0) {
+    bru.setEnvVar("webhookEventId", body.webhook_events[0].id, { persist: true });
+  }
+}
+
+tests {
+  test("list webhook events returns 200", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().webhook_events).to.be.an("array");
+  });
+}

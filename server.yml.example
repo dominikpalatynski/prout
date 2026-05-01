@@ -9,3 +9,12 @@ log:
   level: info
   format: json
   add_source: false
+
+github:
+  app_id: 123456
+  private_key_path: /etc/toolshed/github-app.pem
+  webhook_secret: replace-me
+  api_base_url: https://api.github.com
+
+operator:
+  bearer_token: replace-me

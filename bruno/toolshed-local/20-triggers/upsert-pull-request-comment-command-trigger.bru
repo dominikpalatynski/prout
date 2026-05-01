@@ -1,0 +1,41 @@
+meta {
+  name: Upsert Pull Request Comment Command Trigger
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{baseUrl}}/api/repositories/{{repositoryId}}/triggers
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{operatorToken}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "type": "pull_request_comment_command",
+    "config": {
+      "matcher": "exact_first_line",
+      "command": "{{commentCommand}}"
+    }
+  }
+}
+
+script:post-response {
+  const body = res.getBody();
+  if (res.getStatus() === 200 && body.trigger) {
+    bru.setEnvVar("repositoryTriggerId", body.trigger.id, { persist: true });
+  }
+}
+
+tests {
+  test("upsert pull_request_comment_command trigger returns 200", function() {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.trigger.type).to.equal("pull_request_comment_command");
+  });
+}

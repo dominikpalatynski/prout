@@ -1,0 +1,40 @@
+meta {
+  name: Upsert Pull Request Label Trigger
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/api/repositories/{{repositoryId}}/triggers
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{operatorToken}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "type": "pull_request_label",
+    "config": {
+      "label": "{{pullRequestLabel}}"
+    }
+  }
+}
+
+script:post-response {
+  const body = res.getBody();
+  if (res.getStatus() === 200 && body.trigger) {
+    bru.setEnvVar("repositoryTriggerId", body.trigger.id, { persist: true });
+  }
+}
+
+tests {
+  test("upsert pull_request_label trigger returns 200", function() {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.trigger.type).to.equal("pull_request_label");
+  });
+}

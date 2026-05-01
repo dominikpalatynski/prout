@@ -15,18 +15,22 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/dominikpalatynski/toolshed/internal/config"
+	"github.com/dominikpalatynski/toolshed/internal/githubapp"
 	applog "github.com/dominikpalatynski/toolshed/internal/log"
 	"github.com/dominikpalatynski/toolshed/internal/store"
+	"github.com/dominikpalatynski/toolshed/internal/triggers"
 )
 
 type Server struct {
-	cfg         *config.Config
-	logger      *slog.Logger
-	http        *http.Server
-	pool        *pgxpool.Pool
-	store       *store.Store
-	riverClient *river.Client[pgx.Tx]
-	riverReady  atomic.Bool
+	cfg            *config.Config
+	logger         *slog.Logger
+	http           *http.Server
+	pool           *pgxpool.Pool
+	store          *store.Store
+	riverClient    *river.Client[pgx.Tx]
+	riverReady     atomic.Bool
+	githubResolver githubapp.Resolver
+	triggerCatalog *triggers.Catalog
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -44,13 +48,21 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, err
 	}
 
+	githubResolver, err := githubapp.New(cfg.GitHub)
+	if err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("init github app client: %w", err)
+	}
+
 	r := chi.NewRouter()
 	s := &Server{
-		cfg:         cfg,
-		logger:      logger,
-		pool:        pool,
-		store:       pingStore,
-		riverClient: riverClient,
+		cfg:            cfg,
+		logger:         logger,
+		pool:           pool,
+		store:          pingStore,
+		riverClient:    riverClient,
+		githubResolver: githubResolver,
+		triggerCatalog: triggers.NewCatalog(),
 	}
 	s.mount(r)
 

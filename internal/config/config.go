@@ -9,9 +9,11 @@ import (
 )
 
 type Config struct {
-	Server ServerConfig `yaml:"server"`
-	DB     DBConfig     `yaml:"db"`
-	Log    LogConfig    `yaml:"log"`
+	Server   ServerConfig   `yaml:"server"`
+	DB       DBConfig       `yaml:"db"`
+	Log      LogConfig      `yaml:"log"`
+	GitHub   GitHubConfig   `yaml:"github"`
+	Operator OperatorConfig `yaml:"operator"`
 }
 
 type ServerConfig struct {
@@ -26,6 +28,17 @@ type LogConfig struct {
 	Level     string `yaml:"level" env:"TOOLSHED_LOG_LEVEL"`
 	Format    string `yaml:"format" env:"TOOLSHED_LOG_FORMAT"`
 	AddSource bool   `yaml:"add_source" env:"TOOLSHED_LOG_ADD_SOURCE"`
+}
+
+type GitHubConfig struct {
+	AppID          int64  `yaml:"app_id" env:"TOOLSHED_GITHUB_APP_ID"`
+	PrivateKeyPath string `yaml:"private_key_path" env:"TOOLSHED_GITHUB_PRIVATE_KEY_PATH"`
+	WebhookSecret  string `yaml:"webhook_secret" env:"TOOLSHED_GITHUB_WEBHOOK_SECRET"`
+	APIBaseURL     string `yaml:"api_base_url" env:"TOOLSHED_GITHUB_API_BASE_URL"`
+}
+
+type OperatorConfig struct {
+	BearerToken string `yaml:"bearer_token" env:"TOOLSHED_OPERATOR_BEARER_TOKEN"`
 }
 
 func Load(path string) (*Config, error) {
