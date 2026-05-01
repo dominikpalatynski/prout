@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dominikpalatynski/toolshed/internal/dispatch"
+	"github.com/dominikpalatynski/toolshed/internal/operations"
 	"github.com/dominikpalatynski/toolshed/internal/store/sqlc"
 	"github.com/dominikpalatynski/toolshed/internal/webhook"
 )
@@ -47,7 +47,7 @@ type Evaluation struct {
 	Matched             bool
 	Reason              string
 	TriggerSnapshotJSON []byte
-	DispatchIntent      *dispatch.Intent
+	OperationIntent     *operations.Intent
 }
 
 func NewCatalog() *Catalog {
@@ -161,7 +161,7 @@ func (c *Catalog) ValidateAndNormalize(triggerType string, rawConfig json.RawMes
 	}
 }
 
-func (c *Catalog) Evaluate(trigger sqlc.RepositoryTriggers, deliveryID string, event webhook.NormalizedEvent) (Evaluation, error) {
+func (c *Catalog) Evaluate(trigger sqlc.RepositoryTriggers, _ string, event webhook.NormalizedEvent) (Evaluation, error) {
 	triggerSnapshotJSON, err := triggerSnapshotJSON(trigger)
 	if err != nil {
 		return Evaluation{}, err
@@ -213,11 +213,11 @@ func (c *Catalog) Evaluate(trigger sqlc.RepositoryTriggers, deliveryID string, e
 		return evaluation, nil
 	}
 
-	dispatchIntent, err := dispatch.NewIntent(trigger.Type, trigger.ID, trigger.IdentityKey, deliveryID, event)
+	operationIntent, err := operations.NewIntent(trigger.Type)
 	if err != nil {
 		return Evaluation{}, err
 	}
-	evaluation.DispatchIntent = &dispatchIntent
+	evaluation.OperationIntent = &operationIntent
 	return evaluation, nil
 }
 

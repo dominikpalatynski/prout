@@ -32,7 +32,7 @@ func TestParseDeliveryPullRequestOpened(t *testing.T) {
 			"action":"opened",
 			"number":42,
 			"repository":{"id":123456},
-			"pull_request":{"head":{"sha":"abc123"}}
+			"pull_request":{"id":987654,"head":{"sha":"abc123"}}
 		}`),
 	)
 	if err != nil {
@@ -47,6 +47,9 @@ func TestParseDeliveryPullRequestOpened(t *testing.T) {
 	}
 	if delivery.Event.PRNumber != 42 {
 		t.Fatalf("ParseDelivery() PRNumber = %d, want 42", delivery.Event.PRNumber)
+	}
+	if delivery.Event.GithubPullRequestID != 987654 {
+		t.Fatalf("ParseDelivery() GithubPullRequestID = %d, want 987654", delivery.Event.GithubPullRequestID)
 	}
 	if delivery.Event.PRHeadSHA != "abc123" {
 		t.Fatalf("ParseDelivery() PRHeadSHA = %q, want %q", delivery.Event.PRHeadSHA, "abc123")

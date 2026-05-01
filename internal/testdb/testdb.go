@@ -2,6 +2,9 @@ package testdb
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -11,6 +14,8 @@ import (
 	"github.com/dominikpalatynski/toolshed/migrations"
 )
 
+var configureDockerEnvOnce sync.Once
+
 // Start spins up a Postgres testcontainer scoped to the test, returns a connected pool.
 // Migrations are applied via goose; callers may skip with -short to bypass.
 func Start(t *testing.T) *pgxpool.Pool {
@@ -18,6 +23,8 @@ func Start(t *testing.T) *pgxpool.Pool {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
 	}
+
+	configureDockerAccessForColima()
 
 	ctx := context.Background()
 	pgC, err := postgres.Run(ctx, "postgres:16-alpine",
@@ -50,4 +57,43 @@ func Start(t *testing.T) *pgxpool.Pool {
 	}
 
 	return pool
+}
+
+func configureDockerAccessForColima() {
+	configureDockerEnvOnce.Do(func() {
+		if _, exists := os.LookupEnv("DOCKER_HOST"); exists {
+			return
+		}
+
+		dockerHost, ok := defaultColimaDockerHost()
+		if !ok {
+			return
+		}
+
+		_ = os.Setenv("DOCKER_HOST", dockerHost)
+
+		if _, exists := os.LookupEnv("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE"); !exists {
+			// Colima exposes the Docker API over a user-space socket on macOS, but the
+			// reaper container must still mount the in-VM Docker socket path.
+			_ = os.Setenv("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
+		}
+	})
+}
+
+func defaultColimaDockerHost() (string, bool) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", false
+	}
+
+	return defaultColimaDockerHostForHome(homeDir)
+}
+
+func defaultColimaDockerHostForHome(homeDir string) (string, bool) {
+	socketPath := filepath.Join(homeDir, ".colima", "default", "docker.sock")
+	if _, err := os.Stat(socketPath); err != nil {
+		return "", false
+	}
+
+	return "unix://" + socketPath, true
 }

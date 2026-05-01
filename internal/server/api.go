@@ -420,15 +420,15 @@ func (s *Server) getWebhookEvent(w http.ResponseWriter, r *http.Request) {
 		evaluations = append(evaluations, webhookEventTriggerEvaluationResponseFromModel(evaluation))
 	}
 
-	dispatches := make([]triggerDispatchResponse, 0, len(detail.Dispatches))
-	for _, dispatchRecord := range detail.Dispatches {
-		dispatches = append(dispatches, triggerDispatchResponseFromModel(dispatchRecord))
+	operationRequests := make([]operationRequestResponse, 0, len(detail.OperationRequests))
+	for _, operationRequest := range detail.OperationRequests {
+		operationRequests = append(operationRequests, operationRequestResponseFromDetail(operationRequest))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"webhook_event": webhookEventResponseFromModel(detail.Event, true),
-		"evaluations":   evaluations,
-		"dispatches":    dispatches,
+		"webhook_event":      webhookEventResponseFromModel(detail.Event, true),
+		"evaluations":        evaluations,
+		"operation_requests": operationRequests,
 	})
 }
 
@@ -482,18 +482,36 @@ type webhookEventTriggerEvaluationResponse struct {
 	CreatedAt           time.Time       `json:"created_at"`
 }
 
-type triggerDispatchResponse struct {
-	ID                              int64           `json:"id"`
-	WebhookEventID                  int64           `json:"webhook_event_id"`
-	WebhookEventTriggerEvaluationID int64           `json:"webhook_event_trigger_evaluation_id"`
-	RepositoryID                    int64           `json:"repository_id"`
-	RepositoryTriggerID             int64           `json:"repository_trigger_id"`
-	DispatchType                    string          `json:"dispatch_type"`
-	Status                          string          `json:"status"`
-	DispatchPayloadJSON             json.RawMessage `json:"dispatch_payload_json"`
-	LastError                       *string         `json:"last_error,omitempty"`
-	ProcessedAt                     *time.Time      `json:"processed_at,omitempty"`
-	CreatedAt                       time.Time       `json:"created_at"`
+type runtimeEnvironmentResponse struct {
+	ID                    int64     `json:"id"`
+	RepositoryID          int64     `json:"repository_id"`
+	PullRequestID         int64     `json:"pull_request_id"`
+	Type                  string    `json:"type"`
+	Status                string    `json:"status"`
+	TargetPRHeadCommitSHA string    `json:"target_pr_head_commit_sha"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
+type operationRequestResponse struct {
+	ID                              int64                       `json:"id"`
+	WebhookEventID                  *int64                      `json:"webhook_event_id,omitempty"`
+	WebhookEventTriggerEvaluationID *int64                      `json:"webhook_event_trigger_evaluation_id,omitempty"`
+	RepositoryID                    int64                       `json:"repository_id"`
+	RepositoryTriggerID             *int64                      `json:"repository_trigger_id,omitempty"`
+	PullRequestID                   int64                       `json:"pull_request_id"`
+	RuntimeEnvironmentID            *int64                      `json:"runtime_environment_id,omitempty"`
+	TargetRuntimeEnvironmentID      *int64                      `json:"target_runtime_environment_id,omitempty"`
+	OperationType                   string                      `json:"operation_type"`
+	Source                          string                      `json:"source"`
+	Status                          string                      `json:"status"`
+	TargetPRHeadCommitSHA           string                      `json:"target_pr_head_commit_sha"`
+	IntentSnapshotJSON              json.RawMessage             `json:"intent_snapshot_json"`
+	Outcome                         *string                     `json:"outcome,omitempty"`
+	LastError                       *string                     `json:"last_error,omitempty"`
+	HandledAt                       *time.Time                  `json:"handled_at,omitempty"`
+	CreatedAt                       time.Time                   `json:"created_at"`
+	RuntimeEnvironment              *runtimeEnvironmentResponse `json:"runtime_environment,omitempty"`
 }
 
 func repositoryResponseFromModel(record sqlc.Repositories) repositoryResponse {
@@ -557,26 +575,52 @@ func webhookEventTriggerEvaluationResponseFromModel(record sqlc.WebhookEventTrig
 	}
 }
 
-func triggerDispatchResponseFromModel(record sqlc.TriggerDispatches) triggerDispatchResponse {
-	var processedAt *time.Time
-	if record.ProcessedAt.Valid {
-		value := record.ProcessedAt.Time.UTC()
-		processedAt = &value
+func runtimeEnvironmentResponseFromModel(record sqlc.RuntimeEnvironments) runtimeEnvironmentResponse {
+	return runtimeEnvironmentResponse{
+		ID:                    record.ID,
+		RepositoryID:          record.RepositoryID,
+		PullRequestID:         record.PullRequestID,
+		Type:                  record.Type,
+		Status:                record.Status,
+		TargetPRHeadCommitSHA: record.TargetPrHeadCommitSha,
+		CreatedAt:             mustTime(record.CreatedAt),
+		UpdatedAt:             mustTime(record.UpdatedAt),
+	}
+}
+
+func operationRequestResponseFromDetail(detail store.WebhookEventOperationRequestDetail) operationRequestResponse {
+	record := detail.OperationRequest
+
+	var handledAt *time.Time
+	if record.HandledAt.Valid {
+		value := record.HandledAt.Time.UTC()
+		handledAt = &value
 	}
 
-	return triggerDispatchResponse{
+	response := operationRequestResponse{
 		ID:                              record.ID,
 		WebhookEventID:                  record.WebhookEventID,
 		WebhookEventTriggerEvaluationID: record.WebhookEventTriggerEvaluationID,
 		RepositoryID:                    record.RepositoryID,
 		RepositoryTriggerID:             record.RepositoryTriggerID,
-		DispatchType:                    record.DispatchType,
+		PullRequestID:                   record.PullRequestID,
+		RuntimeEnvironmentID:            record.RuntimeEnvironmentID,
+		TargetRuntimeEnvironmentID:      record.TargetRuntimeEnvironmentID,
+		OperationType:                   record.OperationType,
+		Source:                          record.Source,
 		Status:                          record.Status,
-		DispatchPayloadJSON:             append(json.RawMessage(nil), record.DispatchPayloadJson...),
+		TargetPRHeadCommitSHA:           record.TargetPrHeadCommitSha,
+		IntentSnapshotJSON:              append(json.RawMessage(nil), record.IntentSnapshotJson...),
+		Outcome:                         record.Outcome,
 		LastError:                       record.LastError,
-		ProcessedAt:                     processedAt,
+		HandledAt:                       handledAt,
 		CreatedAt:                       mustTime(record.CreatedAt),
 	}
+	if detail.RuntimeEnvironment != nil {
+		runtimeEnvironment := runtimeEnvironmentResponseFromModel(*detail.RuntimeEnvironment)
+		response.RuntimeEnvironment = &runtimeEnvironment
+	}
+	return response
 }
 
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {

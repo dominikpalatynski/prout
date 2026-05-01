@@ -34,8 +34,15 @@ type Repository struct {
 	IsPrivate            bool
 }
 
+type PullRequest struct {
+	GithubPullRequestID int64
+	Number              int
+	HeadSHA             string
+}
+
 type Resolver interface {
 	ResolveRepository(ctx context.Context, fullName string) (Repository, error)
+	ResolvePullRequest(ctx context.Context, owner, name string, installationID int64, number int) (PullRequest, error)
 }
 
 type APIError struct {
@@ -108,6 +115,30 @@ func (c *Client) ResolveRepository(ctx context.Context, fullName string) (Reposi
 
 	repo.GithubInstallationID = installationID
 	return repo, nil
+}
+
+func (c *Client) ResolvePullRequest(ctx context.Context, owner, name string, installationID int64, number int) (PullRequest, error) {
+	if strings.TrimSpace(owner) == "" || strings.TrimSpace(name) == "" {
+		return PullRequest{}, fmt.Errorf("repository owner and name are required")
+	}
+	if installationID <= 0 {
+		return PullRequest{}, fmt.Errorf("github installation id must be positive")
+	}
+	if number <= 0 {
+		return PullRequest{}, fmt.Errorf("pull request number must be positive")
+	}
+
+	appJWT, err := c.appJWT(time.Now().UTC())
+	if err != nil {
+		return PullRequest{}, fmt.Errorf("create github app jwt: %w", err)
+	}
+
+	installationToken, err := c.createInstallationToken(ctx, appJWT, installationID)
+	if err != nil {
+		return PullRequest{}, err
+	}
+
+	return c.getPullRequest(ctx, installationToken, owner, name, number)
 }
 
 func parsePrivateKey(privateKeyPEM []byte) (*rsa.PrivateKey, error) {
@@ -250,6 +281,41 @@ func (c *Client) getRepository(ctx context.Context, installationToken, owner, na
 		FullName:           fullName,
 		HTMLURL:            strings.TrimSpace(response.HTMLURL),
 		IsPrivate:          response.Private,
+	}, nil
+}
+
+func (c *Client) getPullRequest(ctx context.Context, installationToken, owner, name string, number int) (PullRequest, error) {
+	req, err := c.newRequest(ctx, http.MethodGet, c.endpointURL(
+		fmt.Sprintf("/repos/%s/%s/pulls/%d", url.PathEscape(owner), url.PathEscape(name), number),
+	), bytes.NewReader(nil), installationToken)
+	if err != nil {
+		return PullRequest{}, err
+	}
+
+	var response struct {
+		ID     int64 `json:"id"`
+		Number int   `json:"number"`
+		Head   struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+	}
+	if err := c.doJSON(req, &response); err != nil {
+		return PullRequest{}, err
+	}
+	if response.ID <= 0 {
+		return PullRequest{}, errors.New("github pull request response missing id")
+	}
+	if response.Number <= 0 {
+		return PullRequest{}, errors.New("github pull request response missing number")
+	}
+	if strings.TrimSpace(response.Head.SHA) == "" {
+		return PullRequest{}, errors.New("github pull request response missing head.sha")
+	}
+
+	return PullRequest{
+		GithubPullRequestID: response.ID,
+		Number:              response.Number,
+		HeadSHA:             strings.TrimSpace(response.Head.SHA),
 	}, nil
 }
 

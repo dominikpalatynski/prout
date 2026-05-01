@@ -51,8 +51,8 @@ func TestEvaluatePullRequestLabelMatch(t *testing.T) {
 	if !evaluation.Matched {
 		t.Fatalf("Evaluate() Matched = false, want true")
 	}
-	if evaluation.DispatchIntent == nil {
-		t.Fatalf("Evaluate() DispatchIntent = nil, want non-nil")
+	if evaluation.OperationIntent == nil {
+		t.Fatalf("Evaluate() OperationIntent = nil, want non-nil")
 	}
 }
 

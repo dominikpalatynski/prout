@@ -15,9 +15,14 @@ type ListWebhookEventsParams struct {
 }
 
 type WebhookEventDetail struct {
-	Event       sqlc.WebhookEvents
-	Evaluations []sqlc.WebhookEventTriggerEvaluations
-	Dispatches  []sqlc.TriggerDispatches
+	Event             sqlc.WebhookEvents
+	Evaluations       []sqlc.WebhookEventTriggerEvaluations
+	OperationRequests []WebhookEventOperationRequestDetail
+}
+
+type WebhookEventOperationRequestDetail struct {
+	OperationRequest   sqlc.OperationRequests
+	RuntimeEnvironment *sqlc.RuntimeEnvironments
 }
 
 func (s *Store) ListWebhookEvents(ctx context.Context, params ListWebhookEventsParams) ([]sqlc.WebhookEvents, error) {
@@ -98,14 +103,29 @@ func (s *Store) GetWebhookEventDetail(ctx context.Context, webhookEventID int64)
 		return WebhookEventDetail{}, err
 	}
 
-	dispatches, err := s.queries.ListTriggerDispatchesByWebhookEventID(ctx, webhookEventID)
+	operationRequests, err := s.queries.ListWebhookEventOperationRequests(ctx, &webhookEventID)
 	if err != nil {
 		return WebhookEventDetail{}, err
 	}
 
+	requestDetails := make([]WebhookEventOperationRequestDetail, 0, len(operationRequests))
+	for _, operationRequest := range operationRequests {
+		detail := WebhookEventOperationRequestDetail{
+			OperationRequest: operationRequest,
+		}
+		if operationRequest.RuntimeEnvironmentID != nil {
+			runtimeEnvironment, err := s.queries.GetRuntimeEnvironmentByID(ctx, *operationRequest.RuntimeEnvironmentID)
+			if err != nil {
+				return WebhookEventDetail{}, err
+			}
+			detail.RuntimeEnvironment = &runtimeEnvironment
+		}
+		requestDetails = append(requestDetails, detail)
+	}
+
 	return WebhookEventDetail{
-		Event:       event,
-		Evaluations: evaluations,
-		Dispatches:  dispatches,
+		Event:             event,
+		Evaluations:       evaluations,
+		OperationRequests: requestDetails,
 	}, nil
 }

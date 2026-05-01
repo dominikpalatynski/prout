@@ -73,17 +73,56 @@ Replace the mock ingress with real GitHub webhook delivery, signature verificati
 
 A real GitHub event is accepted once, persisted once, and asynchronously forwarded for downstream processing.
 
-## Phase 3: Tarball Retrieval and Workspace Materialization
+## Phase 3A: Runtime Environment Lifecycle Foundation
 
 **Goal**
 
-Fetch repository code for an exact commit SHA and materialize it into an isolated workspace on disk.
+Introduce the first real runtime-domain slice after webhook-trigger matching: global operation typing, durable operation requests, per-attempt runtime-environment records, worker-owned attempt creation, and durable operation outcomes.
 
 **Potential entities**
 
-- `repositories` in active use
-- Minimal deployment attempt tracking if needed before full runtime state
-- Early `environments` record only if it improves lifecycle clarity
+- `pull_requests` as a stable per-repository anchor for pull-request state, including the current head commit and GitHub pull-request identifier
+- `operation_requests`
+- `runtime_environments`
+- Optional global runtime-environment type catalog if implemented in code or seed data
+- Immutable operation-request intent snapshot and outcome fields
+
+**Potential helpers / packages**
+
+- Operation type mapper independent from trigger type
+- Pull-request upsert logic that refreshes the current head commit from supported webhook events
+- Operation-request creator at the trigger-match boundary
+- Operation-request snapshot builder for retries and historical inspection
+- Runtime-environment state transition helper
+- Worker-side idempotency / ensure logic for `preview-start`
+- Operation-request outcome writer
+- Pull-request anchor lookup helpers for runtime attempts and target head commits
+
+**Infrastructure topics**
+
+- Database schema for runtime-environment attempts
+- Database schema for operation requests and their outcomes
+- Request-path transaction boundary that persists webhook interpretation, pull-request anchor updates, operation requests, and River enqueue together
+- Execution scope limited to `preview-start`; other operation types remain modeled but not yet executable
+- Status model for `preparing`, `prepared`, `failed`, and `superseded`
+- Outcome model for created-versus-reused operation handling
+- Clear boundary between queued dispatch work and started runtime attempts
+- Webhook-event detail hydration extended with operation requests and linked runtime-attempt context
+
+**Acceptance boundary**
+
+A matched preview-start trigger produces an operation request, the worker creates or reuses the correct runtime-environment attempt, the attempt ends this phase in `preparing`, and the resulting operation outcome is persisted durably.
+
+## Phase 3B: Tarball Retrieval and Workspace Materialization
+
+**Goal**
+
+Extend `preview-start` so it fetches repository code for an exact commit SHA and materializes it into an isolated workspace on disk owned by one runtime-environment attempt.
+
+**Potential entities**
+
+- `runtime_environments` in active use
+- Optional workspace-location fields on runtime environments if lifecycle clarity requires them
 
 **Potential helpers / packages**
 
@@ -102,7 +141,7 @@ Fetch repository code for an exact commit SHA and materialize it into an isolate
 
 **Acceptance boundary**
 
-Given a PR event and commit SHA, the system produces a clean workspace containing the expected repository contents.
+Given a preview-start operation and target head commit, the same operation flow advances the runtime environment from `preparing` to `prepared` and produces a clean workspace containing the expected repository contents.
 
 ## Phase 4: Runtime Deployment via Docker Compose
 

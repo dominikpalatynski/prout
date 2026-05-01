@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/dominikpalatynski/toolshed/internal/jobs"
 	applog "github.com/dominikpalatynski/toolshed/internal/log"
+	"github.com/dominikpalatynski/toolshed/internal/operations"
 	"github.com/dominikpalatynski/toolshed/internal/store/sqlc"
 	"github.com/dominikpalatynski/toolshed/internal/webhook"
 )
@@ -134,17 +136,17 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		response["ignored_reason"] = *result.Event.IgnoredReason
 	}
 	if result.Event.Status == "processed" {
-		response["dispatch_count"] = result.DispatchCount
+		response["operation_request_count"] = result.OperationRequestCount
 	}
 
 	writeJSON(w, http.StatusAccepted, response)
 }
 
 type webhookProcessResult struct {
-	Event           sqlc.WebhookEvents
-	DispatchCount   int
-	Duplicate       bool
-	ProcessingError error
+	Event                 sqlc.WebhookEvents
+	OperationRequestCount int
+	Duplicate             bool
+	ProcessingError       error
 }
 
 func (s *Server) persistIgnoredVerifiedDelivery(ctx context.Context, delivery webhook.Delivery, ignoredReason string) (sqlc.WebhookEvents, bool, error) {
@@ -284,13 +286,28 @@ func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery 
 			return nil
 		}
 
+		event, err := s.resolvePullRequestTarget(ctx, repositoryRecord, delivery.Event)
+		if err != nil {
+			return markFailed(&repositoryID, fmt.Errorf("resolve pull request target: %w", err))
+		}
+
+		pullRequestRecord, err := q.UpsertPullRequestAnchor(ctx, sqlc.UpsertPullRequestAnchorParams{
+			RepositoryID:         repositoryRecord.ID,
+			PRNumber:             int64(event.PRNumber),
+			GithubPullRequestID:  githubPullRequestIDParam(event.GithubPullRequestID),
+			CurrentHeadCommitSha: event.PRHeadSHA,
+		})
+		if err != nil {
+			return markFailed(&repositoryID, fmt.Errorf("upsert pull request anchor: %w", err))
+		}
+
 		triggerRecords, err := q.ListEnabledRepositoryTriggers(ctx, repositoryRecord.ID)
 		if err != nil {
 			return markFailed(&repositoryID, fmt.Errorf("list enabled repository triggers: %w", err))
 		}
 
 		for _, triggerRecord := range triggerRecords {
-			evaluation, err := s.triggerCatalog.Evaluate(triggerRecord, delivery.DeliveryID, delivery.Event)
+			evaluation, err := s.triggerCatalog.Evaluate(triggerRecord, delivery.DeliveryID, event)
 			if err != nil {
 				return markFailed(&repositoryID, fmt.Errorf("evaluate repository trigger %d: %w", triggerRecord.ID, err))
 			}
@@ -306,30 +323,56 @@ func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery 
 				return markFailed(&repositoryID, fmt.Errorf("insert webhook event trigger evaluation: %w", err))
 			}
 
-			if evaluation.DispatchIntent == nil {
+			if evaluation.OperationIntent == nil {
 				continue
 			}
 
-			dispatchRecord, err := q.InsertTriggerDispatch(ctx, sqlc.InsertTriggerDispatchParams{
-				WebhookEventID:                  result.Event.ID,
-				WebhookEventTriggerEvaluationID: evaluationRecord.ID,
-				RepositoryID:                    repositoryRecord.ID,
-				RepositoryTriggerID:             triggerRecord.ID,
-				DispatchType:                    evaluation.DispatchIntent.DispatchType,
-				Status:                          "queued",
-				DispatchPayloadJson:             evaluation.DispatchIntent.PayloadJSON,
+			runtimeEnvironmentType, err := operations.RuntimeEnvironmentTypeForOperation(evaluation.OperationIntent.OperationType)
+			if err != nil {
+				return markFailed(&repositoryID, fmt.Errorf("resolve runtime environment type for operation %q: %w", evaluation.OperationIntent.OperationType, err))
+			}
+
+			intentSnapshotJSON, err := operations.BuildTriggerSnapshot(operations.TriggerSnapshotInput{
+				RepositoryID:           repositoryRecord.ID,
+				PullRequestID:          pullRequestRecord.ID,
+				PRNumber:               pullRequestRecord.PRNumber,
+				GithubPullRequestID:    pullRequestRecord.GithubPullRequestID,
+				DeliveryID:             delivery.DeliveryID,
+				Event:                  event,
+				TriggerID:              triggerRecord.ID,
+				TriggerType:            triggerRecord.Type,
+				TriggerIdentityKey:     triggerRecord.IdentityKey,
+				OperationType:          evaluation.OperationIntent.OperationType,
+				RuntimeEnvironmentType: runtimeEnvironmentType,
+				TargetPRHeadCommitSHA:  event.PRHeadSHA,
 			})
 			if err != nil {
-				return markFailed(&repositoryID, fmt.Errorf("insert trigger dispatch: %w", err))
+				return markFailed(&repositoryID, fmt.Errorf("build operation request snapshot: %w", err))
 			}
 
-			if _, err := s.riverClient.InsertTx(ctx, tx, jobs.TriggerDispatchArgs{
-				TriggerDispatchID: dispatchRecord.ID,
+			operationRequest, err := q.InsertOperationRequest(ctx, sqlc.InsertOperationRequestParams{
+				WebhookEventID:                  &result.Event.ID,
+				WebhookEventTriggerEvaluationID: &evaluationRecord.ID,
+				RepositoryID:                    repositoryRecord.ID,
+				RepositoryTriggerID:             &triggerRecord.ID,
+				PullRequestID:                   pullRequestRecord.ID,
+				OperationType:                   evaluation.OperationIntent.OperationType,
+				Source:                          operations.SourceTrigger,
+				Status:                          operations.StatusQueued,
+				TargetPrHeadCommitSha:           event.PRHeadSHA,
+				IntentSnapshotJson:              intentSnapshotJSON,
+			})
+			if err != nil {
+				return markFailed(&repositoryID, fmt.Errorf("insert operation request: %w", err))
+			}
+
+			if _, err := s.riverClient.InsertTx(ctx, tx, jobs.OperationRequestArgs{
+				OperationRequestID: operationRequest.ID,
 			}, nil); err != nil {
-				return markFailed(&repositoryID, fmt.Errorf("enqueue trigger dispatch job: %w", err))
+				return markFailed(&repositoryID, fmt.Errorf("enqueue operation request job: %w", err))
 			}
 
-			result.DispatchCount++
+			result.OperationRequestCount++
 		}
 
 		updated, err := q.MarkWebhookEventProcessed(ctx, sqlc.MarkWebhookEventProcessedParams{
@@ -344,4 +387,33 @@ func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery 
 	})
 
 	return result, err
+}
+
+func (s *Server) resolvePullRequestTarget(ctx context.Context, repository sqlc.Repositories, event webhook.NormalizedEvent) (webhook.NormalizedEvent, error) {
+	if strings.TrimSpace(event.PRHeadSHA) != "" {
+		return event, nil
+	}
+	if s.githubResolver == nil {
+		return webhook.NormalizedEvent{}, errors.New("github resolver is unavailable")
+	}
+
+	pullRequest, err := s.githubResolver.ResolvePullRequest(ctx, repository.Owner, repository.Name, repository.GithubInstallationID, event.PRNumber)
+	if err != nil {
+		return webhook.NormalizedEvent{}, err
+	}
+
+	if event.GithubPullRequestID == 0 {
+		event.GithubPullRequestID = pullRequest.GithubPullRequestID
+	}
+	if strings.TrimSpace(event.PRHeadSHA) == "" {
+		event.PRHeadSHA = pullRequest.HeadSHA
+	}
+	return event, nil
+}
+
+func githubPullRequestIDParam(value int64) *int64 {
+	if value <= 0 {
+		return nil
+	}
+	return &value
 }

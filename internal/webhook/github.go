@@ -29,15 +29,16 @@ type Delivery struct {
 }
 
 type NormalizedEvent struct {
-	Type               string `json:"type"`
-	GithubRepositoryID int64  `json:"github_repository_id"`
-	PRNumber           int    `json:"pr_number"`
-	PRHeadSHA          string `json:"pr_head_sha,omitempty"`
-	Label              string `json:"label,omitempty"`
-	CommentID          int64  `json:"comment_id,omitempty"`
-	CommentBody        string `json:"comment_body,omitempty"`
-	CommentFirstLine   string `json:"comment_first_line,omitempty"`
-	CommentAuthorLogin string `json:"comment_author_login,omitempty"`
+	Type                string `json:"type"`
+	GithubRepositoryID  int64  `json:"github_repository_id"`
+	PRNumber            int    `json:"pr_number"`
+	GithubPullRequestID int64  `json:"github_pull_request_id,omitempty"`
+	PRHeadSHA           string `json:"pr_head_sha,omitempty"`
+	Label               string `json:"label,omitempty"`
+	CommentID           int64  `json:"comment_id,omitempty"`
+	CommentBody         string `json:"comment_body,omitempty"`
+	CommentFirstLine    string `json:"comment_first_line,omitempty"`
+	CommentAuthorLogin  string `json:"comment_author_login,omitempty"`
 }
 
 func VerifySignature(secret, signatureHeader string, body []byte) error {
@@ -140,7 +141,8 @@ type githubPayload struct {
 		ID int64 `json:"id"`
 	} `json:"repository"`
 	PullRequest struct {
-		Number int `json:"number"`
+		ID     int64 `json:"id"`
+		Number int   `json:"number"`
 		Head   struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
@@ -191,10 +193,11 @@ func normalizePullRequestEvent(payload githubPayload, eventType string, requireL
 	}
 
 	event := NormalizedEvent{
-		Type:               eventType,
-		GithubRepositoryID: payload.Repository.ID,
-		PRNumber:           prNumber,
-		PRHeadSHA:          headSHA,
+		Type:                eventType,
+		GithubRepositoryID:  payload.Repository.ID,
+		PRNumber:            prNumber,
+		GithubPullRequestID: payload.PullRequest.ID,
+		PRHeadSHA:           headSHA,
 	}
 
 	if requireLabel {
