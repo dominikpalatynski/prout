@@ -400,6 +400,22 @@ func (s *Server) getWebhookEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	includePayload, err := queryBool(r, "include_payload", false)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	includeSnapshots, err := queryBool(r, "include_snapshots", false)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
 	detail, err := s.store.GetWebhookEventDetail(r.Context(), webhookEventID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -417,16 +433,16 @@ func (s *Server) getWebhookEvent(w http.ResponseWriter, r *http.Request) {
 
 	evaluations := make([]webhookEventTriggerEvaluationResponse, 0, len(detail.Evaluations))
 	for _, evaluation := range detail.Evaluations {
-		evaluations = append(evaluations, webhookEventTriggerEvaluationResponseFromModel(evaluation))
+		evaluations = append(evaluations, webhookEventTriggerEvaluationResponseFromModel(evaluation, includeSnapshots))
 	}
 
 	operationRequests := make([]operationRequestResponse, 0, len(detail.OperationRequests))
 	for _, operationRequest := range detail.OperationRequests {
-		operationRequests = append(operationRequests, operationRequestResponseFromDetail(operationRequest))
+		operationRequests = append(operationRequests, operationRequestResponseFromDetail(operationRequest, includeSnapshots))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"webhook_event":      webhookEventResponseFromModel(detail.Event, true),
+		"webhook_event":      webhookEventResponseFromModel(detail.Event, includePayload),
 		"evaluations":        evaluations,
 		"operation_requests": operationRequests,
 	})
@@ -478,7 +494,7 @@ type webhookEventTriggerEvaluationResponse struct {
 	RepositoryTriggerID int64           `json:"repository_trigger_id"`
 	Matched             bool            `json:"matched"`
 	Reason              string          `json:"reason"`
-	TriggerSnapshotJSON json.RawMessage `json:"trigger_snapshot_json"`
+	TriggerSnapshotJSON json.RawMessage `json:"trigger_snapshot_json,omitempty"`
 	CreatedAt           time.Time       `json:"created_at"`
 }
 
@@ -506,7 +522,7 @@ type operationRequestResponse struct {
 	Source                          string                      `json:"source"`
 	Status                          string                      `json:"status"`
 	TargetPRHeadCommitSHA           string                      `json:"target_pr_head_commit_sha"`
-	IntentSnapshotJSON              json.RawMessage             `json:"intent_snapshot_json"`
+	IntentSnapshotJSON              json.RawMessage             `json:"intent_snapshot_json,omitempty"`
 	Outcome                         *string                     `json:"outcome,omitempty"`
 	LastError                       *string                     `json:"last_error,omitempty"`
 	HandledAt                       *time.Time                  `json:"handled_at,omitempty"`
@@ -563,16 +579,19 @@ func webhookEventResponseFromModel(record sqlc.WebhookEvents, includePayload boo
 	return response
 }
 
-func webhookEventTriggerEvaluationResponseFromModel(record sqlc.WebhookEventTriggerEvaluations) webhookEventTriggerEvaluationResponse {
-	return webhookEventTriggerEvaluationResponse{
+func webhookEventTriggerEvaluationResponseFromModel(record sqlc.WebhookEventTriggerEvaluations, includeSnapshot bool) webhookEventTriggerEvaluationResponse {
+	response := webhookEventTriggerEvaluationResponse{
 		ID:                  record.ID,
 		WebhookEventID:      record.WebhookEventID,
 		RepositoryTriggerID: record.RepositoryTriggerID,
 		Matched:             record.Matched,
 		Reason:              record.Reason,
-		TriggerSnapshotJSON: append(json.RawMessage(nil), record.TriggerSnapshotJson...),
 		CreatedAt:           mustTime(record.CreatedAt),
 	}
+	if includeSnapshot {
+		response.TriggerSnapshotJSON = append(json.RawMessage(nil), record.TriggerSnapshotJson...)
+	}
+	return response
 }
 
 func runtimeEnvironmentResponseFromModel(record sqlc.RuntimeEnvironments) runtimeEnvironmentResponse {
@@ -588,7 +607,7 @@ func runtimeEnvironmentResponseFromModel(record sqlc.RuntimeEnvironments) runtim
 	}
 }
 
-func operationRequestResponseFromDetail(detail store.WebhookEventOperationRequestDetail) operationRequestResponse {
+func operationRequestResponseFromDetail(detail store.WebhookEventOperationRequestDetail, includeSnapshot bool) operationRequestResponse {
 	record := detail.OperationRequest
 
 	var handledAt *time.Time
@@ -610,11 +629,13 @@ func operationRequestResponseFromDetail(detail store.WebhookEventOperationReques
 		Source:                          record.Source,
 		Status:                          record.Status,
 		TargetPRHeadCommitSHA:           record.TargetPrHeadCommitSha,
-		IntentSnapshotJSON:              append(json.RawMessage(nil), record.IntentSnapshotJson...),
 		Outcome:                         record.Outcome,
 		LastError:                       record.LastError,
 		HandledAt:                       handledAt,
 		CreatedAt:                       mustTime(record.CreatedAt),
+	}
+	if includeSnapshot {
+		response.IntentSnapshotJSON = append(json.RawMessage(nil), record.IntentSnapshotJson...)
 	}
 	if detail.RuntimeEnvironment != nil {
 		runtimeEnvironment := runtimeEnvironmentResponseFromModel(*detail.RuntimeEnvironment)
@@ -659,6 +680,19 @@ func queryLimit(r *http.Request, defaultValue, maxValue int) (int, error) {
 	}
 	if parsed > maxValue {
 		parsed = maxValue
+	}
+	return parsed, nil
+}
+
+func queryBool(r *http.Request, key string, defaultValue bool) (bool, error) {
+	value := strings.TrimSpace(r.URL.Query().Get(key))
+	if value == "" {
+		return defaultValue, nil
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean", key)
 	}
 	return parsed, nil
 }

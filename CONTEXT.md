@@ -12,6 +12,10 @@ _Avoid_: Admin, maintainer, owner
 A GitHub repository registered in Toolshed and managed as a unit of automation and preview behavior.
 _Avoid_: Project, app, codebase
 
+**Pull Request Source Repository**:
+The GitHub repository that contains the current **Pull Request Head Commit** targeted for preview work.
+_Avoid_: Head repo, fork repo, source repo
+
 **Pull Request**:
 A GitHub pull request within one **Repository** that can trigger preview automation.
 _Avoid_: PR, merge request
@@ -90,6 +94,7 @@ _Avoid_: Server config, app config
 - A Toolshed installation manages one or more **Repositories**
 - A **Repository** can have many **Pull Requests**
 - A **Pull Request** has one current **Pull Request Head Commit**
+- A **Pull Request** references one current **Pull Request Source Repository**
 - A **Repository** can define multiple **Triggers**
 - A matched **Trigger** can create one **Operation Request**
 - A **Trigger** maps to exactly one **Operation Type**
@@ -153,11 +158,12 @@ _Avoid_: Server config, app config
 - "preview environment" was being used to mean both the long-lived PR slot and one concrete lifecycle attempt. Resolved: a **Preview Environment** is per attempt; one **Pull Request** can produce multiple **Preview Environments** over time.
 - "queued preview" was being used to mean both queued asynchronous intent and a started runtime attempt. Resolved: **Operation Request** covers queued work before the worker starts; **Runtime Environment** begins when the worker starts runtime preparation.
 - A **Runtime Environment Status** for Phase 3 was unclear. Resolved: the initial status set is `preparing`, `prepared`, `failed`, and `superseded`.
-- The meaning of `prepared` was unclear. Resolved: `prepared` means runtime preparation succeeded and the materialized workspace still exists for the next lifecycle step; it is not only a historical success marker.
+- The meaning of `prepared` was unclear. Resolved: `prepared` is a backend-agnostic **Runtime Environment Status** meaning one attempt has a ready deployment input for the next lifecycle step; in Phase 3B that means the tarball was successfully materialized and promoted from staging into the final workspace, the materialized workspace still exists, and the runtime is not yet started.
 - "preview label" and "preview comment" were being treated as separate kinds of work. Resolved: different **Triggers** can map to the same **Operation Type**, and idempotency belongs to the **Operation Type**.
 - It was unclear whether **Operation Type** belongs to repository configuration. Resolved: **Operation Type** is a global built-in system category, while repositories only choose which **Triggers** are enabled.
 - It was unclear whether technical retries create new attempts. Resolved: retries of the same queued operation stay within the same **Runtime Environment**; a new **Runtime Environment** only starts when a new operation attempt begins.
 - It was unclear what happens after `failed`. Resolved: a later domain-level retry of the same **Operation Type** starts a new **Runtime Environment** rather than reopening the failed one.
+- It was unclear when one **Runtime Environment** attempt becomes `failed` during technical retries. Resolved: transient retries of the same **Operation Request** stay within the same attempt; the attempt becomes `failed` only after a permanent error or after the allowed retries for that request are exhausted.
 - It was unclear whether replacement rules are global or operation-specific. Resolved: concurrency and replacement policy belong to the **Operation Type**. For preview-triggered work, repeated `/preview` or `preview` label actions do not replace an in-flight attempt; a separate restart-style **Operation Type** handles explicit replacement.
 - The `preview-start` **Operation Type** semantics were unclear. Resolved: `preview-start` is an ensure-style operation: create a new attempt only when no current preview attempt exists for that target; otherwise report the existing state instead of replacing it.
 - It was unclear how to distinguish technical request handling success from the domain result of the operation. Resolved: handled operation requests produce a machine-readable **Operation Outcome** such as creating a new runtime attempt or reporting an already-existing one.
@@ -178,7 +184,18 @@ _Avoid_: Server config, app config
 - It was unclear whether a preview attempt reads its target commit indirectly from the live pull request. Resolved: each **Preview Environment** stores its own immutable target **Pull Request Head Commit** copied from the creating **Operation Request**.
 - It was unclear whether repeated requests for the same target create parallel attempts. Resolved: multiple **Operation Requests** may reference the same **Preview Environment** when they resolve to the same target and current runtime attempt.
 - It was unclear whether automatic and manual cleanup share one operation kind. Resolved: manual `preview-delete` and automatic cleanup of superseded preview attempts are different **Operation Types** with separate audit meaning.
+- It was unclear what Phase 3B "cleanup" includes. Resolved: Phase 3B includes local technical cleanup of temporary materialization state and the first executable automatic cleanup flow for `superseded` preview attempts; manual `preview-delete` remains later work.
 - It was unclear whether every queued operation must come from a trigger. Resolved: **Operation Requests** have an explicit source and may be created either from matched **Triggers** or from system-initiated actions such as automatic cleanup.
 - It was unclear whether automatic cleanup of superseded preview attempts is best-effort or guaranteed with the state change. Resolved: when a preview attempt becomes `superseded`, the automatic cleanup **Operation Request** is created in the same transaction.
+- It was unclear when an older preview attempt becomes `superseded` relative to a newer target. Resolved: when `preview-start` creates a new attempt for a newer **Pull Request Head Commit**, the older attempt becomes `superseded` in the same worker transaction, and its automatic cleanup request is created there as well.
+- It was unclear how an in-flight superseded attempt behaves without active cancellation. Resolved: Toolshed does not actively cancel the worker; the worker must re-check attempt state at safe boundaries and a `superseded` attempt must never be promoted to `prepared`.
+- It was unclear whether `prepared` can be trusted without checking storage state. Resolved: `prepared` requires a valid materialized workspace for that attempt; if the workspace is missing or invalid, the old attempt is no longer a trustworthy prepared input and a new attempt must be created for the same target.
+- It was unclear whether every future lifecycle detail should expand the operator-visible status model. Resolved: **Runtime Environment Status** stays a coarse operator-visible lifecycle state, while finer-grained preparation and deployment progress should be tracked separately as technical pipeline step state.
+- It was unclear whether future source/deploy/health stages should become separate business operations. Resolved: `preview-start` remains one high-level **Operation Type** expressing business intent, and its finer-grained state machine belongs inside that operation's technical execution model rather than multiplying operation types for each step.
 - It was unclear whether cleanup requests resolve their target dynamically in the worker. Resolved: cleanup-style **Operation Requests** store an immutable target **Runtime Environment** when they are created.
 - It was unclear whether queued operations should depend only on live joined state. Resolved: each **Operation Request** stores its own immutable operation-intent snapshot so retries and audit do not depend on later changes to triggers, pull requests, or runtime attempts.
+- "real environment setup" was being used to mean both repository materialization and container runtime startup. Resolved: in Phase 3B, `preview-start` only retrieves repository source and materializes workspace for one **Runtime Environment** attempt; container startup belongs to later runtime deployment work.
+- "workspace entity" was being proposed as if workspace were already a domain concept. Resolved: workspace remains a technical artifact on disk; any separate persistence for workspace location is an implementation choice attached to a **Runtime Environment**, not a new domain term by default.
+- "workspace path" was being tied to one job/request execution. Resolved: the materialized workspace belongs to one **Runtime Environment** attempt and is identified from that attempt, so technical retries of the same **Operation Request** reuse the same workspace locator rather than creating per-job paths.
+- It was unclear whether the materialized workspace should point at the tarball wrapper directory or the repository root itself. Resolved: the final workspace for one **Runtime Environment** attempt is the repository root after removing GitHub's tarball wrapper directory.
+- "repository" was being used to mean both the registered base repository and the repository that actually contains the pull request head commit. Resolved: **Repository** remains the registered base repository in Toolshed, while **Pull Request Source Repository** names the repository that provides the previewed head commit.
