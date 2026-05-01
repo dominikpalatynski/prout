@@ -20,6 +20,26 @@ _Avoid_: Deployment, stack, sandbox
 A repository-specific rule that authorizes Toolshed to start work for a pull request.
 _Avoid_: Hook, command, automation
 
+**Trigger Type**:
+A global trigger category built into Toolshed that defines one family of event matching and the configuration shape expected by that rule.
+_Avoid_: Trigger instance, repository rule, plugin
+
+**GitHub Delivery**:
+One signed webhook request sent by GitHub to Toolshed.
+_Avoid_: Event, notification, callback
+
+**Webhook Event**:
+An immutable inbox record created from one verified GitHub Delivery and stored for deduplication, audit, and downstream handling.
+_Avoid_: Job, trigger, notification
+
+**Pull Request Conversation Comment**:
+A comment added in the main conversation thread of a pull request, not an inline review comment on the diff.
+_Avoid_: PR comment, review comment, inline comment
+
+**Trigger Dispatch**:
+The durable record of downstream asynchronous work that Toolshed schedules after a Trigger matches a Webhook Event.
+_Avoid_: Queue job, task, evaluation
+
 **Server Configuration**:
 Install-time system configuration loaded at startup and edited outside the panel.
 _Avoid_: Repo config, runtime settings
