@@ -1,4 +1,5 @@
 version: "3"
+dotenv: [".env"]
 
 vars:
   BIN_DIR: ./bin
@@ -131,13 +132,18 @@ tasks:
       - task: dev:up
       - sleep 2
       - task: migrate:up
-
+  toolshed:
+    desc: Run the toolshed binary
+    cmds: ["{{.BIN_DIR}}/toolshed"]
+    
   migrate:up:
-    cmds: ["go tool goose -dir ./migrations postgres \"$TOOLSHED_DB_DSN\" up"]
+    cmds: ["go run ./cmd/toolshed migrate up"]
   migrate:down:
-    cmds: ["go tool goose -dir ./migrations postgres \"$TOOLSHED_DB_DSN\" down"]
+    cmds: ["go run ./cmd/toolshed migrate down"]
   migrate:status:
-    cmds: ["go tool goose -dir ./migrations postgres \"$TOOLSHED_DB_DSN\" status"]
+    cmds: ["go run ./cmd/toolshed migrate status"]
+  migrate:version:
+    cmds: ["go run ./cmd/toolshed migrate version"]
   migrate:create:
     desc: "Create new migration file. Usage: task migrate:create -- add_user_role"
     cmds:

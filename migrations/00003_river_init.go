@@ -10,23 +10,25 @@ import (
 )
 
 func init() {
-	goose.AddMigrationContext(upRiverInit, downRiverInit)
+	goose.AddNamedMigrationNoTxContext("00003_river_init.go", upRiverInit, downRiverInit)
 }
 
-func upRiverInit(ctx context.Context, tx *sql.Tx) error {
-	migrator, err := rivermigrate.New(riverdatabasesql.New(nil), nil)
+func upRiverInit(ctx context.Context, db *sql.DB) error {
+	migrator, err := rivermigrate.New(riverdatabasesql.New(db), nil)
 	if err != nil {
 		return err
 	}
-	_, err = migrator.MigrateTx(ctx, tx, rivermigrate.DirectionUp, nil)
+	_, err = migrator.Migrate(ctx, rivermigrate.DirectionUp, nil)
 	return err
 }
 
-func downRiverInit(ctx context.Context, tx *sql.Tx) error {
-	migrator, err := rivermigrate.New(riverdatabasesql.New(nil), nil)
+func downRiverInit(ctx context.Context, db *sql.DB) error {
+	migrator, err := rivermigrate.New(riverdatabasesql.New(db), nil)
 	if err != nil {
 		return err
 	}
-	_, err = migrator.MigrateTx(ctx, tx, rivermigrate.DirectionDown, nil)
+	_, err = migrator.Migrate(ctx, rivermigrate.DirectionDown, &rivermigrate.MigrateOpts{
+		TargetVersion: -1,
+	})
 	return err
 }

@@ -5,7 +5,10 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
+
+	"github.com/dominikpalatynski/toolshed/migrations"
 )
 
 // Start spins up a Postgres testcontainer scoped to the test, returns a connected pool.
@@ -39,8 +42,12 @@ func Start(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 
-	// TODO(scaffold): run goose migrations against the new pool once the
-	// migrations package exposes a programmatic Up() helper. See scaffold_tech.md §6.1.
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	if _, err := migrations.Up(ctx, sqlDB); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
 
 	return pool
 }
