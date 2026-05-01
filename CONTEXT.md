@@ -64,3 +64,4 @@ _Avoid_: Server config, app config
 ## Flagged ambiguities
 
 - "Phase 1 foundation" was being used to include GitHub App auth, OAuth, ACME, and panel/public-domain concerns. Resolved: Phase 1 only covers the walking skeleton needed for local bootstrap, database connectivity, migrations, queue startup, health checks, and a mock ingress-to-job path.
+- "repository_id" was being used to mean both the internal **Repository** identifier and GitHub's repository identifier. Resolved: `repository_id` means the Toolshed **Repository** identifier; GitHub's identifier is `github_repository_id`.

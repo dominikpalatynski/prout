@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/dominikpalatynski/toolshed/internal/githubapp"
+	applog "github.com/dominikpalatynski/toolshed/internal/log"
 	"github.com/dominikpalatynski/toolshed/internal/store"
 	"github.com/dominikpalatynski/toolshed/internal/store/sqlc"
 )
@@ -54,7 +55,9 @@ func (s *Server) registerRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	record, err := s.store.Q().UpsertRepository(r.Context(), sqlc.UpsertRepositoryParams{
+	ctx := applog.WithGitHubRepositoryID(r.Context(), repository.GithubRepositoryID)
+
+	record, err := s.store.Q().UpsertRepository(ctx, sqlc.UpsertRepositoryParams{
 		GithubRepositoryID:   repository.GithubRepositoryID,
 		GithubInstallationID: repository.GithubInstallationID,
 		Owner:                repository.Owner,
@@ -64,7 +67,7 @@ func (s *Server) registerRepository(w http.ResponseWriter, r *http.Request) {
 		IsPrivate:            repository.IsPrivate,
 	})
 	if err != nil {
-		s.logger.ErrorContext(r.Context(), "upsert repository failed", "error", err, "full_name", request.FullName)
+		s.logger.ErrorContext(ctx, "upsert repository failed", "error", err, "full_name", request.FullName)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to persist repository",
 		})
@@ -105,6 +108,8 @@ func (s *Server) patchRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := applog.WithRepoID(r.Context(), repositoryID)
+
 	var request struct {
 		Enabled *bool `json:"enabled"`
 	}
@@ -121,7 +126,7 @@ func (s *Server) patchRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	record, err := s.store.Q().SetRepositoryEnabled(r.Context(), sqlc.SetRepositoryEnabledParams{
+	record, err := s.store.Q().SetRepositoryEnabled(ctx, sqlc.SetRepositoryEnabledParams{
 		ID:      repositoryID,
 		Enabled: *request.Enabled,
 	})
@@ -133,7 +138,7 @@ func (s *Server) patchRepository(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		s.logger.ErrorContext(r.Context(), "set repository enabled failed", "error", err, "repository_id", repositoryID)
+		s.logger.ErrorContext(ctx, "set repository enabled failed", "error", err, "repository_id", repositoryID)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to update repository",
 		})
@@ -154,23 +159,25 @@ func (s *Server) listRepositoryTriggers(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if _, err := s.store.Q().GetRepositoryByID(r.Context(), repositoryID); err != nil {
+	ctx := applog.WithRepoID(r.Context(), repositoryID)
+
+	if _, err := s.store.Q().GetRepositoryByID(ctx, repositoryID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{
 				"error": "repository not found",
 			})
 			return
 		}
-		s.logger.ErrorContext(r.Context(), "get repository failed", "error", err, "repository_id", repositoryID)
+		s.logger.ErrorContext(ctx, "get repository failed", "error", err, "repository_id", repositoryID)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to load repository",
 		})
 		return
 	}
 
-	triggers, err := s.store.Q().ListRepositoryTriggers(r.Context(), repositoryID)
+	triggers, err := s.store.Q().ListRepositoryTriggers(ctx, repositoryID)
 	if err != nil {
-		s.logger.ErrorContext(r.Context(), "list repository triggers failed", "error", err, "repository_id", repositoryID)
+		s.logger.ErrorContext(ctx, "list repository triggers failed", "error", err, "repository_id", repositoryID)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to list repository triggers",
 		})
@@ -196,14 +203,16 @@ func (s *Server) upsertRepositoryTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if _, err := s.store.Q().GetRepositoryByID(r.Context(), repositoryID); err != nil {
+	ctx := applog.WithRepoID(r.Context(), repositoryID)
+
+	if _, err := s.store.Q().GetRepositoryByID(ctx, repositoryID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{
 				"error": "repository not found",
 			})
 			return
 		}
-		s.logger.ErrorContext(r.Context(), "get repository failed", "error", err, "repository_id", repositoryID)
+		s.logger.ErrorContext(ctx, "get repository failed", "error", err, "repository_id", repositoryID)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to load repository",
 		})
@@ -235,7 +244,7 @@ func (s *Server) upsertRepositoryTrigger(w http.ResponseWriter, r *http.Request)
 		enabled = *request.Enabled
 	}
 
-	record, err := s.store.Q().UpsertRepositoryTrigger(r.Context(), sqlc.UpsertRepositoryTriggerParams{
+	record, err := s.store.Q().UpsertRepositoryTrigger(ctx, sqlc.UpsertRepositoryTriggerParams{
 		RepositoryID: repositoryID,
 		Type:         validatedTrigger.Type,
 		EventFamily:  validatedTrigger.EventFamily,
@@ -244,7 +253,7 @@ func (s *Server) upsertRepositoryTrigger(w http.ResponseWriter, r *http.Request)
 		Enabled:      enabled,
 	})
 	if err != nil {
-		s.logger.ErrorContext(r.Context(), "upsert repository trigger failed", "error", err, "repository_id", repositoryID)
+		s.logger.ErrorContext(ctx, "upsert repository trigger failed", "error", err, "repository_id", repositoryID)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to persist repository trigger",
 		})
@@ -264,6 +273,8 @@ func (s *Server) patchRepositoryTrigger(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
+
+	ctx := applog.WithRepoID(r.Context(), repositoryID)
 
 	triggerID, err := pathInt64(r, "triggerID")
 	if err != nil {
@@ -289,7 +300,7 @@ func (s *Server) patchRepositoryTrigger(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	record, err := s.store.Q().SetRepositoryTriggerEnabled(r.Context(), sqlc.SetRepositoryTriggerEnabledParams{
+	record, err := s.store.Q().SetRepositoryTriggerEnabled(ctx, sqlc.SetRepositoryTriggerEnabledParams{
 		RepositoryID: repositoryID,
 		ID:           triggerID,
 		Enabled:      *request.Enabled,
@@ -302,7 +313,7 @@ func (s *Server) patchRepositoryTrigger(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		s.logger.ErrorContext(r.Context(), "set repository trigger enabled failed", "error", err, "repository_id", repositoryID, "trigger_id", triggerID)
+		s.logger.ErrorContext(ctx, "set repository trigger enabled failed", "error", err, "repository_id", repositoryID, "trigger_id", triggerID)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to update repository trigger",
 		})
@@ -356,9 +367,14 @@ func (s *Server) listWebhookEvents(w http.ResponseWriter, r *http.Request) {
 		filters.DeliveryID = &value
 	}
 
-	events, err := s.store.ListWebhookEvents(r.Context(), filters)
+	ctx := r.Context()
+	if filters.RepositoryID != nil {
+		ctx = applog.WithRepoID(ctx, *filters.RepositoryID)
+	}
+
+	events, err := s.store.ListWebhookEvents(ctx, filters)
 	if err != nil {
-		s.logger.ErrorContext(r.Context(), "list webhook events failed", "error", err)
+		s.logger.ErrorContext(ctx, "list webhook events failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to list webhook events",
 		})

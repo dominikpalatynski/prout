@@ -10,11 +10,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/riverqueue/river"
+
+	applog "github.com/dominikpalatynski/toolshed/internal/log"
 )
 
 func (s *Server) mount(r chi.Router) {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
+	r.Use(applog.RequestLogger(s.logger))
 	r.Use(middleware.Recoverer)
 
 	r.Get("/healthz", s.healthz)
@@ -22,16 +25,16 @@ func (s *Server) mount(r chi.Router) {
 	r.Post("/webhooks/github", s.handleGitHubWebhook)
 
 	r.Route("/api", func(r chi.Router) {
-		r.Use(s.requireOperatorBearer)
-		r.Get("/trigger-types", s.listTriggerTypes)
-		r.Get("/repositories", s.listRepositories)
-		r.Post("/repositories", s.registerRepository)
-		r.Patch("/repositories/{repositoryID}", s.patchRepository)
-		r.Get("/repositories/{repositoryID}/triggers", s.listRepositoryTriggers)
-		r.Post("/repositories/{repositoryID}/triggers", s.upsertRepositoryTrigger)
-		r.Patch("/repositories/{repositoryID}/triggers/{triggerID}", s.patchRepositoryTrigger)
-		r.Get("/webhook-events", s.listWebhookEvents)
-		r.Get("/webhook-events/{webhookEventID}", s.getWebhookEvent)
+		protected := r.With(s.requireOperatorBearer)
+		protected.Get("/trigger-types", s.listTriggerTypes)
+		protected.Get("/repositories", s.listRepositories)
+		protected.Post("/repositories", s.registerRepository)
+		protected.Patch("/repositories/{repositoryID}", s.patchRepository)
+		protected.Get("/repositories/{repositoryID}/triggers", s.listRepositoryTriggers)
+		protected.Post("/repositories/{repositoryID}/triggers", s.upsertRepositoryTrigger)
+		protected.Patch("/repositories/{repositoryID}/triggers/{triggerID}", s.patchRepositoryTrigger)
+		protected.Get("/webhook-events", s.listWebhookEvents)
+		protected.Get("/webhook-events/{webhookEventID}", s.getWebhookEvent)
 	})
 }
 

@@ -71,6 +71,9 @@ func (h *ctxHandler) Handle(ctx context.Context, r slog.Record) error {
 	if repo, ok := ctx.Value(repoIDKey{}).(int64); ok {
 		r.AddAttrs(slog.Int64("repository_id", repo))
 	}
+	if repo, ok := ctx.Value(githubRepoIDKey{}).(int64); ok {
+		r.AddAttrs(slog.Int64("github_repository_id", repo))
+	}
 	if jobID, ok := ctx.Value(jobIDKey{}).(int64); ok {
 		r.AddAttrs(slog.Int64("river_job_id", jobID))
 	}
@@ -86,19 +89,28 @@ func (h *ctxHandler) WithGroup(name string) slog.Handler {
 }
 
 type (
-	prNumberKey struct{}
-	repoIDKey   struct{}
-	jobIDKey    struct{}
+	prNumberKey     struct{}
+	repoIDKey       struct{}
+	githubRepoIDKey struct{}
+	jobIDKey        struct{}
 )
 
 func WithPRNumber(ctx context.Context, n int) context.Context {
+	AddRequestLogAttrs(ctx, slog.Int("pr_number", n))
 	return context.WithValue(ctx, prNumberKey{}, n)
 }
 
 func WithRepoID(ctx context.Context, id int64) context.Context {
+	AddRequestLogAttrs(ctx, slog.Int64("repository_id", id))
 	return context.WithValue(ctx, repoIDKey{}, id)
 }
 
+func WithGitHubRepositoryID(ctx context.Context, id int64) context.Context {
+	AddRequestLogAttrs(ctx, slog.Int64("github_repository_id", id))
+	return context.WithValue(ctx, githubRepoIDKey{}, id)
+}
+
 func WithJobID(ctx context.Context, id int64) context.Context {
+	AddRequestLogAttrs(ctx, slog.Int64("river_job_id", id))
 	return context.WithValue(ctx, jobIDKey{}, id)
 }

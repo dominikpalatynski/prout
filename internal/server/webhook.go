@@ -36,6 +36,10 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		r.Header.Get("X-GitHub-Delivery"),
 		body,
 	)
+	ctx := r.Context()
+	if delivery.GithubRepositoryID != nil {
+		ctx = applog.WithGitHubRepositoryID(ctx, *delivery.GithubRepositoryID)
+	}
 	if err != nil {
 		if len(delivery.PayloadJSON) == 0 {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -44,9 +48,9 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		failedEvent, duplicate, persistErr := s.persistFailedVerifiedDelivery(r.Context(), delivery, err.Error())
+		failedEvent, duplicate, persistErr := s.persistFailedVerifiedDelivery(ctx, delivery, err.Error())
 		if persistErr != nil {
-			s.logger.ErrorContext(r.Context(), "persist failed webhook event failed", "error", persistErr)
+			s.logger.ErrorContext(ctx, "persist failed webhook event failed", "error", persistErr)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
 				"error": "failed to persist webhook event",
 			})
@@ -67,9 +71,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
 	if delivery.Supported {
-		ctx = applog.WithRepoID(ctx, delivery.Event.GithubRepositoryID)
 		ctx = applog.WithPRNumber(ctx, delivery.Event.PRNumber)
 	}
 
@@ -98,6 +100,9 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := s.processSupportedVerifiedDelivery(ctx, delivery)
+	if result.Event.RepositoryID != nil {
+		ctx = applog.WithRepoID(ctx, *result.Event.RepositoryID)
+	}
 	if err != nil {
 		s.logger.ErrorContext(ctx, "process webhook delivery failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
