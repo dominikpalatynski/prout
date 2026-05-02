@@ -40,5 +40,9 @@ func (s *Store) Tx(ctx context.Context, fn func(*sqlc.Queries, pgx.Tx) error) er
 	if err := fn(s.queries.WithTx(tx), tx); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	runAfterCommitHooks(ctx)
+	return nil
 }

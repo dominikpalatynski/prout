@@ -57,6 +57,8 @@ func (w *OperationRequestWorker) runCleanupRuntimeTeardownStep(
 	operationRequest sqlc.OperationRequests,
 	runtimeEnvironment sqlc.RuntimeEnvironments,
 ) error {
+	ctx = w.withHistoryAfterCommit(ctx)
+
 	currentRequest := operationRequest
 
 	deploymentRecord, found, err := w.loadRuntimeEnvironmentDeploymentRecord(ctx, runtimeEnvironment.ID)
@@ -106,6 +108,8 @@ func (w *OperationRequestWorker) advanceCleanupToWorkspaceStep(
 	runtimeEnvironment sqlc.RuntimeEnvironments,
 	runtimeTeardownRan bool,
 ) error {
+	ctx = w.withHistoryAfterCommit(ctx)
+
 	return w.store.Tx(ctx, func(q *sqlc.Queries, _ pgx.Tx) error {
 		extra := map[string]any{
 			"runtime_teardown_ran": runtimeTeardownRan,
@@ -123,6 +127,8 @@ func (w *OperationRequestWorker) runCleanupWorkspaceStep(
 	operationRequest sqlc.OperationRequests,
 	runtimeEnvironment sqlc.RuntimeEnvironments,
 ) error {
+	ctx = w.withHistoryAfterCommit(ctx)
+
 	currentRequest := operationRequest
 	if currentRequest.CurrentStepState == operations.StepStatePending {
 		if err := w.store.Tx(ctx, func(q *sqlc.Queries, _ pgx.Tx) error {
@@ -163,10 +169,11 @@ func (w *OperationRequestWorker) insertSupersededCleanupOperationRequestTx(
 		return errors.New("operation request enqueuer is unavailable")
 	}
 
-	initialStep, err := operations.InitialStepForOperation(operations.TypePreviewCleanupSuperseded)
+	operationDefinition, err := w.automationRegistry.OperationByKey(operations.TypePreviewCleanupSuperseded)
 	if err != nil {
 		return err
 	}
+	initialStep := operationDefinition.InitialStep
 	intentSnapshotJSON, err := operations.BuildCleanupSupersededSnapshot(
 		targetRuntimeEnvironment.RepositoryID,
 		targetRuntimeEnvironment.PullRequestID,

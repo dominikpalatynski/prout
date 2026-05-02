@@ -8,7 +8,7 @@ storage:
     workspace_root: /var/lib/toolshed/workspaces
 
 jobs:
-  operation_request_timeout: 10m
+  operation_request_timeout: 30m
 
 runtime:
   ingress_network: toolshed-traefik

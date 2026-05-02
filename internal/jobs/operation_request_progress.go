@@ -28,6 +28,8 @@ func (w *OperationRequestWorker) finalizeOperationRequestFailure(
 	operationRequestID int64,
 	cause error,
 ) error {
+	ctx = w.withHistoryAfterCommit(ctx)
+
 	return w.store.Tx(ctx, func(q *sqlc.Queries, _ pgx.Tx) error {
 		operationRequest, err := q.GetOperationRequestByID(ctx, operationRequestID)
 		if err != nil {
@@ -42,6 +44,9 @@ func (w *OperationRequestWorker) finalizeOperationRequestFailure(
 			"runtime_environment_id": operationRequest.RuntimeEnvironmentID,
 			"error":                  message,
 		}); err != nil {
+			return err
+		}
+		if _, err := w.appendOperationRequestHistoryEntry(ctx, q, buildRequestFailedHistorySpec(operationRequest, cause)); err != nil {
 			return err
 		}
 
@@ -83,6 +88,9 @@ func (w *OperationRequestWorker) completeOperationRequestTx(
 	details any,
 ) error {
 	if _, err := w.transitionOperationRequestStepTx(ctx, q, operationRequest, step, runtimeEnvironmentID, details); err != nil {
+		return err
+	}
+	if _, err := w.appendOperationRequestHistoryEntry(ctx, q, buildRequestCompletedHistorySpec(operationRequest, runtimeEnvironmentID, outcome)); err != nil {
 		return err
 	}
 	if _, err := q.MarkOperationRequestHandled(ctx, sqlc.MarkOperationRequestHandledParams{
@@ -148,6 +156,15 @@ func (w *OperationRequestWorker) transitionOperationRequestStepTx(
 	if err != nil {
 		return sqlc.OperationRequests{}, fmt.Errorf("update operation request progress: %w", err)
 	}
+
+	historySpec := buildStepTransitionHistorySpec(updated.ID, nextStep, details)
+	if historySpec == nil {
+		return updated, nil
+	}
+	if _, err := w.appendOperationRequestHistoryEntry(ctx, q, *historySpec); err != nil {
+		return sqlc.OperationRequests{}, err
+	}
+
 	return updated, nil
 }
 

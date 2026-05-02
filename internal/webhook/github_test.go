@@ -39,27 +39,24 @@ func TestParseDeliveryPullRequestOpened(t *testing.T) {
 		t.Fatalf("ParseDelivery() error = %v", err)
 	}
 
-	if !delivery.Supported {
-		t.Fatalf("ParseDelivery() Supported = false, want true")
-	}
 	if delivery.EventType != EventTypePullRequestOpened {
 		t.Fatalf("ParseDelivery() EventType = %q, want %q", delivery.EventType, EventTypePullRequestOpened)
 	}
-	if delivery.Event.PRNumber != 42 {
-		t.Fatalf("ParseDelivery() PRNumber = %d, want 42", delivery.Event.PRNumber)
+	if delivery.GithubAction != "opened" {
+		t.Fatalf("ParseDelivery() GithubAction = %q, want %q", delivery.GithubAction, "opened")
 	}
-	if delivery.Event.GithubPullRequestID != 987654 {
-		t.Fatalf("ParseDelivery() GithubPullRequestID = %d, want 987654", delivery.Event.GithubPullRequestID)
+	if delivery.Payload.Number != 42 {
+		t.Fatalf("ParseDelivery() payload number = %d, want 42", delivery.Payload.Number)
 	}
-	if delivery.Event.PRHeadSHA != "abc123" {
-		t.Fatalf("ParseDelivery() PRHeadSHA = %q, want %q", delivery.Event.PRHeadSHA, "abc123")
+	if delivery.Payload.PullRequest.ID != 987654 {
+		t.Fatalf("ParseDelivery() pull_request.id = %d, want 987654", delivery.Payload.PullRequest.ID)
 	}
-	if delivery.Event.PRSourceRepository.FullName != "acme/demo" {
-		t.Fatalf("ParseDelivery() PRSourceRepository.FullName = %q, want %q", delivery.Event.PRSourceRepository.FullName, "acme/demo")
+	if delivery.Payload.PullRequest.Head.SHA != "abc123" {
+		t.Fatalf("ParseDelivery() pull_request.head.sha = %q, want %q", delivery.Payload.PullRequest.Head.SHA, "abc123")
 	}
 }
 
-func TestParseDeliveryIssueCommentOnIssueIsUnsupported(t *testing.T) {
+func TestParseDeliveryIssueCommentOnIssuePreservesPayload(t *testing.T) {
 	t.Parallel()
 
 	delivery, err := ParseDelivery(
@@ -76,15 +73,15 @@ func TestParseDeliveryIssueCommentOnIssueIsUnsupported(t *testing.T) {
 		t.Fatalf("ParseDelivery() error = %v", err)
 	}
 
-	if delivery.Supported {
-		t.Fatalf("ParseDelivery() Supported = true, want false")
-	}
 	if delivery.EventType != EventTypeIssueCommentCreated {
 		t.Fatalf("ParseDelivery() EventType = %q, want %q", delivery.EventType, EventTypeIssueCommentCreated)
 	}
+	if delivery.Payload.Issue.PullRequest != nil {
+		t.Fatalf("ParseDelivery() issue.pull_request = %#v, want nil", delivery.Payload.Issue.PullRequest)
+	}
 }
 
-func TestParseDeliveryPullRequestCommentCommand(t *testing.T) {
+func TestParseDeliveryPullRequestCommentPayload(t *testing.T) {
 	t.Parallel()
 
 	delivery, err := ParseDelivery(
@@ -101,13 +98,10 @@ func TestParseDeliveryPullRequestCommentCommand(t *testing.T) {
 		t.Fatalf("ParseDelivery() error = %v", err)
 	}
 
-	if !delivery.Supported {
-		t.Fatalf("ParseDelivery() Supported = false, want true")
+	if delivery.Payload.Comment.Body != "/deploy\nplease" {
+		t.Fatalf("ParseDelivery() comment.body = %q, want %q", delivery.Payload.Comment.Body, "/deploy\nplease")
 	}
-	if delivery.Event.CommentFirstLine != "/deploy" {
-		t.Fatalf("ParseDelivery() CommentFirstLine = %q, want %q", delivery.Event.CommentFirstLine, "/deploy")
-	}
-	if delivery.Event.CommentAuthorLogin != "octocat" {
-		t.Fatalf("ParseDelivery() CommentAuthorLogin = %q, want %q", delivery.Event.CommentAuthorLogin, "octocat")
+	if delivery.Payload.Comment.User.Login != "octocat" {
+		t.Fatalf("ParseDelivery() comment.user.login = %q, want %q", delivery.Payload.Comment.User.Login, "octocat")
 	}
 }

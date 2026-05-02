@@ -2,27 +2,18 @@
 INSERT INTO repository_triggers (
     repository_id,
     type,
-    event_family,
-    identity_key,
-    config_json,
     enabled
 ) VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3
 )
-ON CONFLICT (repository_id, identity_key) DO UPDATE
+ON CONFLICT (repository_id, type) DO UPDATE
 SET
-    type = EXCLUDED.type,
-    event_family = EXCLUDED.event_family,
-    config_json = EXCLUDED.config_json,
     enabled = EXCLUDED.enabled,
     updated_at = NOW()
 RETURNING
     id,
     repository_id,
     type,
-    event_family,
-    identity_key,
-    config_json,
     enabled,
     created_at,
     updated_at;
@@ -32,9 +23,6 @@ SELECT
     id,
     repository_id,
     type,
-    event_family,
-    identity_key,
-    config_json,
     enabled,
     created_at,
     updated_at
@@ -47,9 +35,6 @@ SELECT
     id,
     repository_id,
     type,
-    event_family,
-    identity_key,
-    config_json,
     enabled,
     created_at,
     updated_at
@@ -63,9 +48,6 @@ SELECT
     id,
     repository_id,
     type,
-    event_family,
-    identity_key,
-    config_json,
     enabled,
     created_at,
     updated_at
@@ -84,9 +66,6 @@ RETURNING
     id,
     repository_id,
     type,
-    event_family,
-    identity_key,
-    config_json,
     enabled,
     created_at,
     updated_at;

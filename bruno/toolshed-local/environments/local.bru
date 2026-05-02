@@ -4,9 +4,11 @@ vars {
   repositoryFullName: dominikpalatynski/test-ready-app
   repositoryId: 1
   repositoryEnabled: true
-  composeFilePath: ./docker-compose.fullapp.yml
+  eventFamilyKey: pull-request-opened
+  eventFamilyEnabled: false
+  composeFilePath: ./compose.yml
   exposedServiceName: app
-  exposedServicePort: 3000
+  exposedServicePort: 8090
   runtimeSettingsComplete: false
   repositoryEnvironmentVariable1Name: APP_ENV
   repositoryEnvironmentVariable1Value: preview
@@ -16,14 +18,15 @@ vars {
   repositoryTriggerId: 1
   triggerEnabled: false
   webhookEventId: 20
+  operationRequestId: 2
   runtimeEnvironmentId: 1
-  webhookListLimit: 20
+  webhookListLimit: 100
   githubRepositoryId: 123456
   pullRequestNumber: 42
   pullRequestHeadSha: abc123
   pullRequestLabel: preview
-  commentCommand: /deploy
-  commentBody: /deploy
+  commentCommand: /preview
+  commentBody: /preview
   commentId: 1001
   commentAuthorLogin: octocat
   webhookSecret: replace-me

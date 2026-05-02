@@ -26,10 +26,14 @@ func (s *Server) mount(r chi.Router) {
 
 	r.Route("/api", func(r chi.Router) {
 		protected := r.With(s.requireOperatorBearer)
+		protected.Get("/event-families", s.listEventFamilies)
 		protected.Get("/trigger-types", s.listTriggerTypes)
 		protected.Get("/repositories", s.listRepositories)
 		protected.Post("/repositories", s.registerRepository)
 		protected.Patch("/repositories/{repositoryID}", s.patchRepository)
+		protected.Get("/repositories/{repositoryID}/event-families", s.listRepositoryEventFamilies)
+		protected.Put("/repositories/{repositoryID}/event-families/{eventFamilyKey}", s.putRepositoryEventFamily)
+		protected.Patch("/repositories/{repositoryID}/event-families/{eventFamilyKey}", s.patchRepositoryEventFamily)
 		protected.Get("/repositories/{repositoryID}/runtime-settings", s.getRepositoryRuntimeSettings)
 		protected.Put("/repositories/{repositoryID}/runtime-settings", s.putRepositoryRuntimeSettings)
 		protected.Get("/repositories/{repositoryID}/environment-variables", s.listRepositoryEnvironmentVariables)
@@ -38,6 +42,8 @@ func (s *Server) mount(r chi.Router) {
 		protected.Post("/repositories/{repositoryID}/triggers", s.upsertRepositoryTrigger)
 		protected.Patch("/repositories/{repositoryID}/triggers/{triggerID}", s.patchRepositoryTrigger)
 		protected.Get("/runtime-environments", s.listRuntimeEnvironments)
+		protected.Get("/operation-requests/{operationRequestID}/history", s.listOperationRequestHistory)
+		protected.Get("/operation-requests/{operationRequestID}/history/live", s.streamOperationRequestHistory)
 		protected.Get("/webhook-events", s.listWebhookEvents)
 		protected.Get("/webhook-events/{webhookEventID}", s.getWebhookEvent)
 	})

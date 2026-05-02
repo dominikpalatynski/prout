@@ -17,8 +17,7 @@ headers {
 
 body:json {
   {
-    "type": "pull_request_comment_command",
-    "config": {}
+    "type": "preview_on_comment_preview"
   }
 }
 
@@ -30,9 +29,9 @@ script:post-response {
 }
 
 tests {
-  test("upsert pull_request_comment_command trigger returns 200", function() {
+  test("upsert preview_on_comment_preview trigger returns 200", function() {
     const body = res.getBody();
     expect(res.getStatus()).to.equal(200);
-    expect(body.trigger.type).to.equal("pull_request_comment_command");
+    expect(body.trigger.type).to.equal("preview_on_comment_preview");
   });
 }

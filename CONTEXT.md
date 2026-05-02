@@ -84,6 +84,14 @@ _Avoid_: PR comment, review comment, inline comment
 The durable queued request for downstream asynchronous work created after a **Trigger** matches a **Webhook Event**.
 _Avoid_: Queue job, task, dispatch
 
+**Operation Request History**:
+The chronological operator-visible record of how one **Operation Request** was handled.
+_Avoid_: Trace, event stream, audit log
+
+**Operation Request History Entry**:
+One operator-visible record inside the **Operation Request History** of a single **Operation Request**.
+_Avoid_: Event, trace span, log line
+
 **Operation Request Status**:
 The technical handling state of one **Operation Request**.
 _Avoid_: Operation Outcome, runtime status
@@ -122,6 +130,8 @@ _Avoid_: Server config, app config
 - An **Operation Type** defines how Toolshed handles an already existing **Runtime Environment** for the same target
 - An **Operation Request** freezes its target **Pull Request Head Commit** when it is created
 - An **Operation Request** keeps an immutable snapshot of the operation intent needed for retries and historical inspection
+- An **Operation Request** has one **Operation Request History**
+- An **Operation Request History** contains one or more **Operation Request History Entries**
 - An **Operation Request** can create one **Runtime Environment** when asynchronous runtime preparation begins
 - An **Operation Request** has one current **Operation Request Status**
 - An **Operation Request** has one **Operation Request Source**
@@ -194,6 +204,8 @@ _Avoid_: Server config, app config
 - It was unclear whether disabling a **Repository Event Family** should also rewrite child **Triggers**. Resolved: disabling a **Repository Event Family** leaves child **Triggers** unchanged but makes them inert until that **Repository Event Family** is enabled again.
 - It was unclear whether **Repository Event Families** should be opt-in or created enabled by default. Resolved: when a **Repository** is registered, all supported **Repository Event Families** are created enabled by default so current webhook behavior stays live until the Operator narrows it.
 - It was unclear whether a **Trigger** may be configured while its parent **Repository Event Family** is disabled. Resolved: a **Trigger** may still be created or enabled while its parent **Repository Event Family** is disabled, but it remains inert until that family is enabled again.
+- It was unclear whether a supported webhook blocked by a disabled **Repository Event Family** should disappear or remain visible for audit. Resolved: Toolshed still stores it as a **Webhook Event** with status `ignored` and a family-specific ignored reason rather than dropping it before persistence.
+- It was unclear whether disabling a **Repository Event Family** should also affect already queued or running work. Resolved: disabling a **Repository Event Family** only affects future webhook intake for that family; already created **Operation Requests** and already started **Runtime Environments** continue unchanged.
 - It was unclear whether **Operation Type** should remain implicit in scattered switch statements. Resolved: **Operation Type** is an explicit built-in model with its own code-level definition, so execution behavior is extended through the registry rather than through scattered switches.
 - It was unclear whether built-in automation rules should stay split across multiple packages or multiple peer registries. Resolved: built-in automation definitions live in one central **Event Family** registry that acts as the single source of truth, with **Trigger Type** and **Operation Type** mappings hanging from those event definitions rather than from separate top-level registries.
 - It was unclear whether **Operation Type** belongs to repository configuration. Resolved: **Operation Type** is a global built-in system category, while repositories only choose which **Triggers** are enabled.
@@ -232,6 +244,9 @@ _Avoid_: Server config, app config
 - It was unclear whether future source/deploy/health stages should become separate business operations. Resolved: `preview-start` remains one high-level **Operation Type** expressing business intent, and its finer-grained state machine belongs inside that operation's technical execution model rather than multiplying operation types for each step.
 - It was unclear whether cleanup requests resolve their target dynamically in the worker. Resolved: cleanup-style **Operation Requests** store an immutable target **Runtime Environment** when they are created.
 - It was unclear whether queued operations should depend only on live joined state. Resolved: each **Operation Request** stores its own immutable operation-intent snapshot so retries and audit do not depend on later changes to triggers, pull requests, or runtime attempts.
+- It was unclear whether every **Operation Request** must create or reference a **Runtime Environment**. Resolved: an **Operation Request** may or may not involve a **Runtime Environment**, depending on its **Operation Type**.
+- It was unclear what object owns the operator-visible history of one operation. Resolved: every **Operation Request** has its own **Operation Request History** even when no **Runtime Environment** is involved.
+- It was unclear whether raw technical command output belongs inside **Operation Request History**. Resolved: **Operation Request History** contains operator-visible milestone entries, while raw technical command output belongs to a separate lower-level technical record.
 - "real environment setup" was being used to mean both repository materialization and container runtime startup. Resolved: in Phase 3B, `preview-start` only retrieves repository source and materializes workspace for one **Runtime Environment** attempt; container startup belongs to later runtime deployment work.
 - "workspace entity" was being proposed as if workspace were already a domain concept. Resolved: workspace remains a technical artifact on disk; any separate persistence for workspace location is an implementation choice attached to a **Runtime Environment**, not a new domain term by default.
 - "workspace path" was being tied to one job/request execution. Resolved: the materialized workspace belongs to one **Runtime Environment** attempt and is identified from that attempt, so technical retries of the same **Operation Request** reuse the same workspace locator rather than creating per-job paths.

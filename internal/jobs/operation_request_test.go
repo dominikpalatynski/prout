@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
+	"github.com/dominikpalatynski/toolshed/internal/automation"
 	"github.com/dominikpalatynski/toolshed/internal/config"
 	"github.com/dominikpalatynski/toolshed/internal/operations"
 	"github.com/dominikpalatynski/toolshed/internal/pullrequests"
@@ -180,6 +182,24 @@ func TestOperationRequestWorkerPreviewStartRetryReusesSameAttempt(t *testing.T) 
 	if !workspaceExists {
 		t.Fatalf("workspaceExists after retry = false, want true")
 	}
+
+	historyEntries, err := appStore.ListOperationRequestHistoryEntries(ctx, operationRequest.ID)
+	if err != nil {
+		t.Fatalf("ListOperationRequestHistoryEntries() error = %v", err)
+	}
+	if got, want := historyKinds(historyEntries), []string{
+		operations.HistoryKindRequestStarted,
+		operations.HistoryKindStepEntered,
+		operations.HistoryKindRequestRetried,
+		operations.HistoryKindStepCompleted,
+		operations.HistoryKindStepEntered,
+		operations.HistoryKindStepCompleted,
+		operations.HistoryKindStepEntered,
+		operations.HistoryKindStepCompleted,
+		operations.HistoryKindRequestCompleted,
+	}; !equalStrings(got, want) {
+		t.Fatalf("history kinds = %v, want %v", got, want)
+	}
 }
 
 func TestOperationRequestWorkerPreviewStartCreatesNewAttemptAfterFailure(t *testing.T) {
@@ -328,6 +348,21 @@ func TestOperationRequestWorkerPreviewStartSupersedesOlderAttemptAndCreatesClean
 	if workspaceExists {
 		t.Fatalf("workspaceExists(cleaned) = true, want false")
 	}
+
+	cleanupHistory, err := appStore.ListOperationRequestHistoryEntries(ctx, cleanupRequest.ID)
+	if err != nil {
+		t.Fatalf("ListOperationRequestHistoryEntries(cleanup) error = %v", err)
+	}
+	if got, want := historyKinds(cleanupHistory), []string{
+		operations.HistoryKindRequestStarted,
+		operations.HistoryKindStepEntered,
+		operations.HistoryKindStepCompleted,
+		operations.HistoryKindStepEntered,
+		operations.HistoryKindStepCompleted,
+		operations.HistoryKindRequestCompleted,
+	}; !equalStrings(got, want) {
+		t.Fatalf("cleanup history kinds = %v, want %v", got, want)
+	}
 }
 
 func TestOperationRequestWorkerPreviewStartRepairsMissingPreparedWorkspace(t *testing.T) {
@@ -474,6 +509,65 @@ func TestOperationRequestWorkerPreviewStartPermanentPreparationFailureFinalizesI
 	}
 	if runtimeEnvironment.Status != operations.RuntimeStatusFailed {
 		t.Fatalf("runtime environment status = %q, want %q", runtimeEnvironment.Status, operations.RuntimeStatusFailed)
+	}
+}
+
+func TestOperationRequestWorkerPermanentFailureSanitizesHistoryAndEmitsDebugLogs(t *testing.T) {
+	pool := testdb.Start(t)
+	appStore := store.New(pool)
+	worker, _ := newTestWorker(t, appStore, []downloadResult{
+		{tarball: mustBuildTarball(t, map[string]string{"README.md": "first\n"})},
+	})
+
+	var logOutput bytes.Buffer
+	worker.logger = slog.New(slog.NewJSONHandler(&logOutput, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	backend := worker.runtimeBackend.(*stubRuntimeBackend)
+	backend.prepareErrors = []error{runtimebackend.PermanentError(errors.New("invalid compose configuration SECRET=super-secret-value"))}
+
+	ctx := context.Background()
+	repository, pullRequest, sourceRepository := mustCreateRepositoryAndPullRequest(t, ctx, appStore, "abc123")
+
+	operationRequest := mustInsertPreviewStartOperationRequest(t, ctx, appStore, repository.ID, pullRequest.ID, sourceRepository, "abc123")
+	if err := worker.Work(ctx, testJob(operationRequest.ID, 1, 3)); err != nil {
+		t.Fatalf("Work() error = %v, want nil for immediate permanent finalization", err)
+	}
+
+	historyEntries, err := appStore.ListOperationRequestHistoryEntries(ctx, operationRequest.ID)
+	if err != nil {
+		t.Fatalf("ListOperationRequestHistoryEntries() error = %v", err)
+	}
+	if got, want := historyKinds(historyEntries), []string{
+		operations.HistoryKindRequestStarted,
+		operations.HistoryKindStepEntered,
+		operations.HistoryKindStepCompleted,
+		operations.HistoryKindStepEntered,
+		operations.HistoryKindStepFailed,
+		operations.HistoryKindRequestFailed,
+	}; !equalStrings(got, want) {
+		t.Fatalf("history kinds = %v, want %v", got, want)
+	}
+
+	for _, entry := range historyEntries {
+		if strings.Contains(string(entry.DetailsJson), "super-secret-value") {
+			t.Fatalf("history details leaked raw secret: %s", entry.DetailsJson)
+		}
+	}
+
+	failureDetails := decodeHistoryDetails(t, historyEntries[len(historyEntries)-1].DetailsJson)
+	if got := failureDetails["error_summary"]; got != "invalid compose configuration SECRET=[REDACTED]" {
+		t.Fatalf("error_summary = %v, want redacted summary", got)
+	}
+
+	logs := logOutput.String()
+	if !strings.Contains(logs, `"history_kind":"request_failed"`) {
+		t.Fatalf("logs missing request_failed history entry: %s", logs)
+	}
+	if !strings.Contains(logs, `"step":"compose_preparation"`) {
+		t.Fatalf("logs missing step context: %s", logs)
+	}
+	if strings.Contains(logs, "super-secret-value") {
+		t.Fatalf("logs leaked raw secret: %s", logs)
 	}
 }
 
@@ -665,7 +759,7 @@ func mustInsertPreviewStartOperationRequest(
 	}
 
 	githubPullRequestID := int64(9001)
-	intentSnapshot, err := operations.BuildTriggerSnapshot(operations.TriggerSnapshotInput{
+	intentSnapshot, err := operations.BuildPreviewStartSnapshot(operations.PreviewStartSnapshotInput{
 		RepositoryID:        repositoryID,
 		PullRequestID:       pullRequestID,
 		PRNumber:            42,
@@ -681,14 +775,13 @@ func mustInsertPreviewStartOperationRequest(
 			PRSourceRepository:  sourceRepository,
 		},
 		TriggerID:              5,
-		TriggerType:            "pull_request_opened",
-		TriggerIdentityKey:     "pull_request_opened",
+		TriggerType:            automation.TriggerTypePreviewOnPullRequestOpened,
 		OperationType:          operations.TypePreviewStart,
 		RuntimeEnvironmentType: operations.RuntimeEnvironmentTypePreview,
 		TargetPRHeadCommitSHA:  targetHeadSHA,
 	})
 	if err != nil {
-		t.Fatalf("BuildTriggerSnapshot() error = %v", err)
+		t.Fatalf("BuildPreviewStartSnapshot() error = %v", err)
 	}
 
 	operationRequest, err := appStore.Q().InsertOperationRequest(ctx, sqlc.InsertOperationRequestParams{
@@ -728,13 +821,20 @@ func newTestWorkerWithEnqueuer(
 	workspaceManager := workspaces.NewFilesystemManager(workspaceRoot)
 	runtimeBackend := &stubRuntimeBackend{}
 	worker := &OperationRequestWorker{
-		logger:           logger,
-		store:            appStore,
-		githubDownloader: &stubTarballDownloader{results: downloadResults},
-		workspaceManager: workspaceManager,
-		runtimeBackend:   runtimeBackend,
-		jobEnqueuer:      enqueuer,
+		logger:             logger,
+		store:              appStore,
+		automationRegistry: automation.NewRegistry(),
+		githubDownloader:   &stubTarballDownloader{results: downloadResults},
+		workspaceManager:   workspaceManager,
+		runtimeBackend:     runtimeBackend,
+		jobEnqueuer:        enqueuer,
+		operationHandlers: map[string]operationHandler{
+			automation.HandlerPreviewStart:             nil,
+			automation.HandlerPreviewCleanupSuperseded: nil,
+		},
 	}
+	worker.operationHandlers[automation.HandlerPreviewStart] = worker.handlePreviewStart
+	worker.operationHandlers[automation.HandlerPreviewCleanupSuperseded] = worker.handlePreviewCleanupSuperseded
 	return worker, workspaceManager
 }
 
@@ -978,4 +1078,38 @@ func decodeStubDeploymentMetadata(
 		return stubDeploymentMetadata{}, err
 	}
 	return metadata, nil
+}
+
+func historyKinds(entries []sqlc.OperationRequestHistoryEntries) []string {
+	kinds := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		kinds = append(kinds, entry.Kind)
+	}
+	return kinds
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx] != right[idx] {
+			return false
+		}
+	}
+	return true
+}
+
+func decodeHistoryDetails(t *testing.T, payload []byte) map[string]any {
+	t.Helper()
+
+	if len(payload) == 0 {
+		return nil
+	}
+
+	var details map[string]any
+	if err := json.Unmarshal(payload, &details); err != nil {
+		t.Fatalf("json.Unmarshal(history details) error = %v", err)
+	}
+	return details
 }

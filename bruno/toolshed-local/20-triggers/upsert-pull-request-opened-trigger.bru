@@ -17,8 +17,7 @@ headers {
 
 body:json {
   {
-    "type": "pull_request_opened",
-    "config": {}
+    "type": "preview_on_pull_request_opened"
   }
 }
 
@@ -30,9 +29,9 @@ script:post-response {
 }
 
 tests {
-  test("upsert pull_request_opened trigger returns 200", function() {
+  test("upsert preview_on_pull_request_opened trigger returns 200", function() {
     const body = res.getBody();
     expect(res.getStatus()).to.equal(200);
-    expect(body.trigger.type).to.equal("pull_request_opened");
+    expect(body.trigger.type).to.equal("preview_on_pull_request_opened");
   });
 }

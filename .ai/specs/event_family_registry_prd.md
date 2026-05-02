@@ -57,6 +57,10 @@ This keeps the model declarative without overcomplicating it. The system will st
 33. As the maintainer of Toolshed, I want every newly registered Repository to receive all supported Repository Event Families as enabled by default, so that the refactor preserves current live webhook behavior unless an Operator narrows it.
 34. As the maintainer of Toolshed, I want existing Repositories to be backfilled with enabled Repository Event Families during migration, so that rollout does not silently disable current automation.
 35. As the Operator, I want to configure a Trigger even when its Repository Event Family is currently disabled, so that I can prepare repository-specific presets before reopening that webhook family.
+36. As the Operator, I want a supported webhook blocked by a disabled Repository Event Family to remain visible as an ignored Webhook Event, so that audit, debugging, and deduplication still work.
+37. As the maintainer of Toolshed, I want Repository Event Family disablement to affect only future webhook intake, so that already created Operation Requests and Runtime Environments are not retroactively canceled by a configuration flip.
+38. As the Operator, I want repository-level Event Family endpoints to address resources by stable Event Family key rather than database row ID, so that the API stays readable and declarative.
+39. As the maintainer of Toolshed, I want the Bruno collection under `bruno/toolshed-local` updated alongside the API refactor, so that operator-facing request flows for Event Families and Triggers remain executable and documented.
 
 ## Implementation Decisions
 
@@ -84,6 +88,7 @@ This keeps the model declarative without overcomplicating it. The system will st
 - Repository registration should seed one enabled Repository Event Family row for every currently supported Event Family.
 - Migration/backfill should seed enabled Repository Event Family rows for every existing Repository so the post-migration default matches today's behavior.
 - Trigger write endpoints should continue to allow creating or enabling a Repository Trigger even when its parent Repository Event Family is disabled; the family gate should only affect webhook-time evaluation, not configuration-time writes.
+- Repository Event Family disablement should be non-retroactive: it should gate only future webhook processing and must not cancel, mutate, or invalidate already persisted Operation Requests or already started Runtime Environments.
 - Repository-specific Trigger persistence should be simplified to a Repository plus Trigger Type enablement model with one row per Repository and Trigger Type.
 - Repository-specific Trigger persistence should no longer treat Event Family, identity key, or preset matcher config as database-owned source of truth.
 - The uniqueness rule for Repository-specific Trigger persistence should become one Trigger per Repository and Trigger Type.
@@ -91,6 +96,7 @@ This keeps the model declarative without overcomplicating it. The system will st
 - Operator-facing APIs should expose both global supported Event Families and repository-level Event Family enablement, not only Trigger Types.
 - Repository Trigger APIs should accept and return business-named Trigger Types instead of generic matcher families that imply arbitrary config.
 - Repository Event Family APIs should accept and return stable Event Family keys rather than raw GitHub event headers, action strings, or Trigger row identifiers.
+- Repository Event Family route parameters should use the stable Event Family key itself, for example `/api/repositories/{repositoryID}/event-families/{eventFamilyKey}`, rather than an internal row ID.
 - The list of available Trigger Types returned to operators should be derived from the central registry rather than from hand-maintained switch logic.
 - The list of available Event Families returned to operators should be derived from the same central registry rather than from hand-maintained switch logic.
 - Existing preview entry points should be migrated from generic technical names toward business-named Trigger Types such as:
@@ -107,6 +113,8 @@ This keeps the model declarative without overcomplicating it. The system will st
   - match the Trigger Type definitions for that Event Family
   - create Operation Requests for the matching Trigger Types
 - If the Repository Event Family is disabled, the webhook pipeline should stop before Trigger evaluation for that Repository and should leave existing Repository Trigger rows unchanged.
+- If the Repository Event Family is disabled, the webhook should still be persisted as a Webhook Event with status `ignored` and a dedicated ignored reason such as `repository_event_family_disabled`.
+- Disabling a Repository Event Family after a Webhook Event has already created Operation Requests should not reopen those records or trigger compensating cancellation flows as part of this refactor.
 - Operation Request snapshots should continue freezing the matched Trigger Type, the resolved Operation Type, and the normalized input needed for retry and audit.
 - Schema changes should include repository-level Event Family enablement storage, simplification of Repository Trigger storage, and migration of existing rows into the new Trigger Type vocabulary.
 - Backward compatibility should be handled through explicit migration or one-time translation rules rather than long-term support for both old and new trigger shapes.
@@ -118,6 +126,12 @@ This keeps the model declarative without overcomplicating it. The system will st
   - the Repository Trigger persistence and API layer
   - the Operation Type definition and handler-dispatch layer
   - the migration/backfill logic for existing Trigger rows
+- Supporting operator artifacts should be updated in the same slice of work:
+  - the Bruno admin collection under `bruno/toolshed-local`
+  - request coverage for listing Event Families
+  - request coverage for listing repository Event Families
+  - request coverage for enabling and disabling repository Event Families by stable key
+  - updated trigger requests if their payload or response shape changes under the new preset-only model
 
 ## API Surface
 
@@ -130,18 +144,33 @@ This keeps the model declarative without overcomplicating it. The system will st
 - `PATCH /api/repositories/{repositoryID}` toggles whole-Repository `enabled` state and is the only current repository-wide webhook gate.
 - The current Trigger responses expose `type`, `event_family`, `identity_key`, `config`, and `enabled`, which reflects today's duplicated source-of-truth problem rather than the desired declarative target shape.
 - `POST /api/repositories` currently registers one Repository and is the natural entry point for seeding default-enabled Repository Event Family rows.
+- The current webhook API already returns ignored webhook events for cases such as unsupported event type, repository not registered, and repository disabled, so repository-level Event Family gating should extend that existing ignored-event model rather than introduce a silent drop path.
 
 ### Proposed API additions and reshaping
 
 - `GET /api/event-families` should list supported Event Families from the central registry, including stable keys, human-readable metadata, and available Trigger Types.
 - `GET /api/repositories/{repositoryID}/event-families` should list repository-level Event Family enablement rows.
-- `PUT /api/repositories/{repositoryID}/event-families/{eventFamily}` should create or replace one Repository Event Family enablement row using the stable Event Family key.
-- `PATCH /api/repositories/{repositoryID}/event-families/{eventFamily}` should toggle `enabled` for one Repository Event Family without replacing future fields.
+- `PUT /api/repositories/{repositoryID}/event-families/{eventFamilyKey}` should create or replace one Repository Event Family enablement row using the stable Event Family key in the path.
+- `PATCH /api/repositories/{repositoryID}/event-families/{eventFamilyKey}` should toggle `enabled` for one Repository Event Family without replacing future fields and should address the resource by stable key, not by database ID.
 - A successful `POST /api/repositories` response should reflect that all supported Repository Event Families now exist enabled by default, either directly in the payload or through immediately consistent follow-up reads on the Event Family endpoint.
 - Toggling one Repository Event Family to `disabled` should not mutate `enabled` on related Trigger rows; it should only change whether those Trigger rows are considered during webhook handling.
 - Repository Trigger endpoints should continue to manage individual Trigger Types, but their request and response shape should move toward closed preset enablement and away from repository-owned `config`, `identity_key`, and `event_family` source-of-truth fields.
 - Repository Trigger endpoints should not reject configuration writes only because the parent Repository Event Family is disabled; they may optionally surface that the Trigger is currently inert through derived metadata, but the write itself should succeed.
 - Event Family endpoints and Trigger endpoints should remain separate resources because one models repository support for a webhook family and the other models repository enablement of one preset inside that family.
+- Webhook responses for a disabled Repository Event Family should mirror the existing ignored-event shape by returning the persisted webhook event ID, status `ignored`, and the family-specific ignored reason.
+- Event Family management endpoints should document that enablement changes apply to later webhook deliveries and do not retroactively cancel already queued or running work.
+
+## Bruno Collection Surface
+
+- The Bruno collection in `bruno/toolshed-local/10-admin` should be updated in the same change set as the API contract so local operator workflows stay in sync.
+- At minimum the collection should gain requests for:
+  - listing supported Event Families
+  - listing repository Event Families
+  - enabling or upserting one repository Event Family by stable `eventFamilyKey`
+  - disabling one repository Event Family by stable `eventFamilyKey`
+- The Bruno requests should persist and reuse the same repository-scoped variables already used by repository admin requests, plus one stable `eventFamilyKey` variable for path-based Event Family operations.
+- If the Event Family request set stays small, it may remain in the existing flat `10-admin` collection layout; if it grows into a broader operator workflow, introducing a dedicated Event Family sub-collection is acceptable as long as the split stays consistent and discoverable.
+- Trigger-related Bruno requests should also be updated if trigger request bodies or responses lose repository-owned `config`, `identity_key`, or `event_family` fields in favor of registry-derived metadata.
 
 ## Testing Decisions
 
@@ -157,7 +186,10 @@ This keeps the model declarative without overcomplicating it. The system will st
 - Registration and migration tests should verify that all supported Repository Event Families are present and enabled by default for new and existing Repositories.
 - Integration tests should verify that disabling one Repository Event Family prevents Trigger evaluation and Operation Request creation for that family while preserving child Trigger enabled flags.
 - API tests should verify that Trigger creation and enablement still succeed while the parent Repository Event Family is disabled and that later webhook handling still ignores those triggers until the family is re-enabled.
+- Webhook ingestion tests should verify that a supported webhook for a disabled Repository Event Family is persisted once, marked `ignored`, tagged with the family-specific ignored reason, and does not create trigger-evaluation rows or Operation Requests.
+- Regression tests should verify that disabling a Repository Event Family after Operation Requests already exist does not mutate those requests or their related Runtime Environments.
 - Repository Trigger persistence tests should verify uniqueness by Repository and Trigger Type and should confirm that redundant matcher metadata is no longer the source of truth.
+- Bruno request smoke coverage should verify that Event Family admin requests address resources by stable key and remain compatible with the live local API contract.
 - Worker dispatch tests should verify that Operation Requests resolve handlers through the registry rather than through hardcoded switch behavior.
 - Migration tests should verify deterministic conversion of existing preview-related Trigger rows into the new Trigger Type vocabulary.
 - API tests should verify operator-facing Event Family listing, Repository Event Family enablement behavior, Trigger Type listing, and Repository Trigger enablement behavior.

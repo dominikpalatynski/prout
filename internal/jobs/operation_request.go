@@ -11,6 +11,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
+	"github.com/dominikpalatynski/toolshed/internal/automation"
 	"github.com/dominikpalatynski/toolshed/internal/config"
 	"github.com/dominikpalatynski/toolshed/internal/githubapp"
 	applog "github.com/dominikpalatynski/toolshed/internal/log"
@@ -29,19 +30,24 @@ func (OperationRequestArgs) Kind() string { return "operation_request" }
 type OperationRequestWorker struct {
 	river.WorkerDefaults[OperationRequestArgs]
 
-	logger *slog.Logger
-	store  *store.Store
+	logger             *slog.Logger
+	store              *store.Store
+	automationRegistry *automation.Registry
 
-	githubDownloader githubapp.TarballDownloader
-	workspaceManager workspaceManager
-	runtimeBackend   runtimebackend.Backend
-	jobEnqueuer      operationRequestEnqueuer
-	jobTimeout       time.Duration
+	githubDownloader  githubapp.TarballDownloader
+	workspaceManager  workspaceManager
+	runtimeBackend    runtimebackend.Backend
+	jobEnqueuer       operationRequestEnqueuer
+	jobTimeout        time.Duration
+	historyPublisher  operationRequestHistoryPublisher
+	operationHandlers map[string]operationHandler
 }
 
 type operationRequestEnqueuer interface {
 	InsertTx(context.Context, pgx.Tx, river.JobArgs, *river.InsertOpts) (*rivertype.JobInsertResult, error)
 }
+
+type operationHandler func(context.Context, sqlc.OperationRequests) error
 
 func (w *OperationRequestWorker) SetJobEnqueuer(enqueuer operationRequestEnqueuer) {
 	w.jobEnqueuer = enqueuer
@@ -57,15 +63,23 @@ func NewWorkers(
 	githubDownloader githubapp.TarballDownloader,
 	workspaceManager workspaceManager,
 	runtimeBackend runtimebackend.Backend,
+	automationRegistry *automation.Registry,
 ) (*river.Workers, *OperationRequestWorker) {
 	workers := river.NewWorkers()
 	worker := &OperationRequestWorker{
-		logger:           logger,
-		store:            appStore,
-		githubDownloader: githubDownloader,
-		workspaceManager: workspaceManager,
-		runtimeBackend:   runtimeBackend,
+		logger:             logger,
+		store:              appStore,
+		automationRegistry: automationRegistry,
+		githubDownloader:   githubDownloader,
+		workspaceManager:   workspaceManager,
+		runtimeBackend:     runtimeBackend,
+		operationHandlers: map[string]operationHandler{
+			automation.HandlerPreviewStart:             nil,
+			automation.HandlerPreviewCleanupSuperseded: nil,
+		},
 	}
+	worker.operationHandlers[automation.HandlerPreviewStart] = worker.handlePreviewStart
+	worker.operationHandlers[automation.HandlerPreviewCleanupSuperseded] = worker.handlePreviewCleanupSuperseded
 	river.AddWorker(workers, worker)
 	return workers, worker
 }
@@ -103,6 +117,10 @@ func (w *OperationRequestWorker) Work(ctx context.Context, job *river.Job[Operat
 		return nil
 	}
 
+	if err := w.recordOperationRequestAttempt(ctx, operationRequest, job.JobRow.Attempt, job.JobRow.MaxAttempts); err != nil {
+		return fmt.Errorf("record operation request history: %w", err)
+	}
+
 	if err := w.handleOperationRequest(ctx, operationRequest); err != nil {
 		if runtimebackend.IsPermanentError(err) {
 			if updateErr := w.finalizeOperationRequestFailure(ctx, operationRequest.ID, err); updateErr != nil {
@@ -128,14 +146,21 @@ func (w *OperationRequestWorker) Work(ctx context.Context, job *river.Job[Operat
 }
 
 func (w *OperationRequestWorker) handleOperationRequest(ctx context.Context, operationRequest sqlc.OperationRequests) error {
-	switch operationRequest.OperationType {
-	case operations.TypePreviewStart:
-		return w.handlePreviewStart(ctx, operationRequest)
-	case operations.TypePreviewCleanupSuperseded:
-		return w.handlePreviewCleanupSuperseded(ctx, operationRequest)
-	default:
-		return fmt.Errorf("unsupported operation type %q", operationRequest.OperationType)
+	operationDefinition, err := w.automationRegistry.OperationByKey(operationRequest.OperationType)
+	if err != nil {
+		return err
 	}
+
+	handler, ok := w.operationHandlers[operationDefinition.HandlerKey]
+	if !ok || handler == nil {
+		return fmt.Errorf(
+			"operation handler %q is unavailable for operation type %q",
+			operationDefinition.HandlerKey,
+			operationRequest.OperationType,
+		)
+	}
+
+	return handler(ctx, operationRequest)
 }
 
 func strPtr(value string) *string {

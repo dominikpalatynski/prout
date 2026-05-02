@@ -39,7 +39,7 @@ type Intent struct {
 	OperationType string
 }
 
-type TriggerSnapshotInput struct {
+type PreviewStartSnapshotInput struct {
 	RepositoryID           int64
 	PullRequestID          int64
 	PRNumber               int64
@@ -49,7 +49,6 @@ type TriggerSnapshotInput struct {
 	Event                  webhook.NormalizedEvent
 	TriggerID              int64
 	TriggerType            string
-	TriggerIdentityKey     string
 	OperationType          string
 	RuntimeEnvironmentType string
 	TargetPRHeadCommitSHA  string
@@ -58,9 +57,8 @@ type TriggerSnapshotInput struct {
 type PreviewStartSnapshot struct {
 	Source  string `json:"source"`
 	Trigger struct {
-		ID          int64  `json:"id"`
-		Type        string `json:"type"`
-		IdentityKey string `json:"identity_key"`
+		ID   int64  `json:"id"`
+		Type string `json:"type"`
 	} `json:"trigger"`
 	Target struct {
 		RepositoryID           int64                         `json:"repository_id"`
@@ -78,40 +76,12 @@ type PreviewStartSnapshot struct {
 	} `json:"delivery"`
 }
 
-func NewIntent(triggerType string) (Intent, error) {
-	operationType, err := TypeForTrigger(triggerType)
-	if err != nil {
-		return Intent{}, err
-	}
-
-	return Intent{OperationType: operationType}, nil
-}
-
-func TypeForTrigger(triggerType string) (string, error) {
-	switch triggerType {
-	case "pull_request_opened", "pull_request_label", "pull_request_comment_command":
-		return TypePreviewStart, nil
-	default:
-		return "", fmt.Errorf("unknown trigger type %q", triggerType)
-	}
-}
-
-func RuntimeEnvironmentTypeForOperation(operationType string) (string, error) {
-	switch operationType {
-	case TypePreviewStart, TypePreviewRestart, TypePreviewDelete, TypePreviewCleanupSuperseded:
-		return RuntimeEnvironmentTypePreview, nil
-	default:
-		return "", fmt.Errorf("unknown operation type %q", operationType)
-	}
-}
-
-func BuildTriggerSnapshot(input TriggerSnapshotInput) ([]byte, error) {
+func BuildPreviewStartSnapshot(input PreviewStartSnapshotInput) ([]byte, error) {
 	snapshot := PreviewStartSnapshot{
 		Source: SourceTrigger,
 	}
 	snapshot.Trigger.ID = input.TriggerID
 	snapshot.Trigger.Type = input.TriggerType
-	snapshot.Trigger.IdentityKey = input.TriggerIdentityKey
 	snapshot.Target.RepositoryID = input.RepositoryID
 	snapshot.Target.PullRequestID = input.PullRequestID
 	snapshot.Target.PRNumber = input.PRNumber

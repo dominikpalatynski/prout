@@ -1,0 +1,30 @@
+meta {
+  name: Put Repository Event Family
+  type: http
+  seq: 8
+}
+
+put {
+  url: {{baseUrl}}/api/repositories/{{repositoryId}}/event-families/{{eventFamilyKey}}
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{operatorToken}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "enabled": {{eventFamilyEnabled}}
+  }
+}
+
+tests {
+  test("put repository event family returns 200", function() {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.event_family.event_family_key).to.equal(bru.getEnvVar("eventFamilyKey"));
+  });
+}

@@ -10,9 +10,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/dominikpalatynski/toolshed/internal/automation"
 	"github.com/dominikpalatynski/toolshed/internal/config"
 	applog "github.com/dominikpalatynski/toolshed/internal/log"
-	"github.com/dominikpalatynski/toolshed/internal/triggers"
 )
 
 func TestMountLogsUnauthorizedOperatorRequests(t *testing.T) {
@@ -31,8 +31,8 @@ func TestMountLogsUnauthorizedOperatorRequests(t *testing.T) {
 				BearerToken: "expected-token",
 			},
 		},
-		logger:         logger,
-		triggerCatalog: triggers.NewCatalog(),
+		logger:             logger,
+		automationRegistry: automation.NewRegistry(),
 	}
 
 	r := chi.NewRouter()

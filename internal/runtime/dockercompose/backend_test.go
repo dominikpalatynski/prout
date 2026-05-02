@@ -228,6 +228,41 @@ func TestPrepareTreatsComposeConfigFailureAsPermanent(t *testing.T) {
 	}
 }
 
+func TestClassifyComposeErrorTreatsDeadlineExceededAsRetryable(t *testing.T) {
+	t.Parallel()
+
+	err := classifyComposeError("up", context.DeadlineExceeded, false)
+	if runtimebackend.IsPermanentError(err) {
+		t.Fatalf("classifyComposeError() permanent = true, want false (err=%v)", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("classifyComposeError() error = %v, want wrapped context deadline exceeded", err)
+	}
+	if !strings.Contains(err.Error(), "exceeded the operation request timeout") {
+		t.Fatalf("classifyComposeError() error = %q, want timeout summary", err.Error())
+	}
+}
+
+func TestClassifyComposeErrorTreatsMissingExternalNetworkAsPermanent(t *testing.T) {
+	t.Parallel()
+
+	err := classifyComposeError("up", errors.New("exit status 1: network toolshed-traefik declared as external, but could not be found"), false)
+	if !runtimebackend.IsPermanentError(err) {
+		t.Fatalf("classifyComposeError() permanent = false, want true (err=%v)", err)
+	}
+	if !strings.Contains(err.Error(), "configured external ingress network") {
+		t.Fatalf("classifyComposeError() error = %q, want ingress network summary", err.Error())
+	}
+}
+
+func TestContainsInfrastructureComposeErrorRecognizesMissingBuildx(t *testing.T) {
+	t.Parallel()
+
+	if !containsInfrastructureComposeError("Docker Compose requires buildx plugin to be installed") {
+		t.Fatalf("containsInfrastructureComposeError() = false, want true for missing buildx plugin")
+	}
+}
+
 type fakeRunner struct {
 	results []fakeRunResult
 	calls   []fakeRunCall

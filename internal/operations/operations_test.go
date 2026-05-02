@@ -1,43 +1,20 @@
-package operations
+package operations_test
 
 import (
 	"encoding/json"
 	"testing"
 
+	"github.com/dominikpalatynski/toolshed/internal/automation"
+	"github.com/dominikpalatynski/toolshed/internal/operations"
 	"github.com/dominikpalatynski/toolshed/internal/pullrequests"
 	"github.com/dominikpalatynski/toolshed/internal/webhook"
 )
 
-func TestTypeForTriggerMapsCurrentTriggerTypesToPreviewStart(t *testing.T) {
-	t.Parallel()
-
-	triggerTypes := []string{
-		"pull_request_opened",
-		"pull_request_label",
-		"pull_request_comment_command",
-	}
-
-	for _, triggerType := range triggerTypes {
-		triggerType := triggerType
-		t.Run(triggerType, func(t *testing.T) {
-			t.Parallel()
-
-			operationType, err := TypeForTrigger(triggerType)
-			if err != nil {
-				t.Fatalf("TypeForTrigger() error = %v", err)
-			}
-			if operationType != TypePreviewStart {
-				t.Fatalf("TypeForTrigger() = %q, want %q", operationType, TypePreviewStart)
-			}
-		})
-	}
-}
-
-func TestBuildTriggerSnapshotFreezesTargetCommit(t *testing.T) {
+func TestBuildPreviewStartSnapshotFreezesTargetCommit(t *testing.T) {
 	t.Parallel()
 
 	githubPullRequestID := int64(9988)
-	snapshotJSON, err := BuildTriggerSnapshot(TriggerSnapshotInput{
+	snapshotJSON, err := operations.BuildPreviewStartSnapshot(operations.PreviewStartSnapshotInput{
 		RepositoryID:        7,
 		PullRequestID:       13,
 		PRNumber:            42,
@@ -61,17 +38,19 @@ func TestBuildTriggerSnapshotFreezesTargetCommit(t *testing.T) {
 			},
 		},
 		TriggerID:              5,
-		TriggerType:            "pull_request_opened",
-		TriggerIdentityKey:     "pull_request_opened",
-		OperationType:          TypePreviewStart,
-		RuntimeEnvironmentType: RuntimeEnvironmentTypePreview,
+		TriggerType:            automation.TriggerTypePreviewOnPullRequestOpened,
+		OperationType:          operations.TypePreviewStart,
+		RuntimeEnvironmentType: operations.RuntimeEnvironmentTypePreview,
 		TargetPRHeadCommitSHA:  "abc123",
 	})
 	if err != nil {
-		t.Fatalf("BuildTriggerSnapshot() error = %v", err)
+		t.Fatalf("BuildPreviewStartSnapshot() error = %v", err)
 	}
 
 	var snapshot struct {
+		Trigger struct {
+			Type string `json:"type"`
+		} `json:"trigger"`
 		Target struct {
 			OperationType          string `json:"operation_type"`
 			RuntimeEnvironmentType string `json:"runtime_environment_type"`
@@ -90,17 +69,32 @@ func TestBuildTriggerSnapshotFreezesTargetCommit(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	if snapshot.Target.OperationType != TypePreviewStart {
-		t.Fatalf("snapshot target operation_type = %q, want %q", snapshot.Target.OperationType, TypePreviewStart)
+	if snapshot.Trigger.Type != automation.TriggerTypePreviewOnPullRequestOpened {
+		t.Fatalf(
+			"snapshot trigger type = %q, want %q",
+			snapshot.Trigger.Type,
+			automation.TriggerTypePreviewOnPullRequestOpened,
+		)
 	}
-	if snapshot.Target.RuntimeEnvironmentType != RuntimeEnvironmentTypePreview {
-		t.Fatalf("snapshot target runtime_environment_type = %q, want %q", snapshot.Target.RuntimeEnvironmentType, RuntimeEnvironmentTypePreview)
+	if snapshot.Target.OperationType != operations.TypePreviewStart {
+		t.Fatalf("snapshot target operation_type = %q, want %q", snapshot.Target.OperationType, operations.TypePreviewStart)
+	}
+	if snapshot.Target.RuntimeEnvironmentType != operations.RuntimeEnvironmentTypePreview {
+		t.Fatalf(
+			"snapshot target runtime_environment_type = %q, want %q",
+			snapshot.Target.RuntimeEnvironmentType,
+			operations.RuntimeEnvironmentTypePreview,
+		)
 	}
 	if snapshot.Target.TargetPRHeadCommitSHA != "abc123" {
 		t.Fatalf("snapshot target_pr_head_commit_sha = %q, want %q", snapshot.Target.TargetPRHeadCommitSHA, "abc123")
 	}
 	if snapshot.Target.PullRequestSourceRepo.FullName != "acme/demo" {
-		t.Fatalf("snapshot target pull_request_source_repository.full_name = %q, want %q", snapshot.Target.PullRequestSourceRepo.FullName, "acme/demo")
+		t.Fatalf(
+			"snapshot target pull_request_source_repository.full_name = %q, want %q",
+			snapshot.Target.PullRequestSourceRepo.FullName,
+			"acme/demo",
+		)
 	}
 	if snapshot.Delivery.ID != "delivery-1" {
 		t.Fatalf("snapshot delivery id = %q, want %q", snapshot.Delivery.ID, "delivery-1")

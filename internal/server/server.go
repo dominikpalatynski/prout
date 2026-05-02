@@ -15,26 +15,27 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
+	"github.com/dominikpalatynski/toolshed/internal/automation"
 	"github.com/dominikpalatynski/toolshed/internal/config"
 	"github.com/dominikpalatynski/toolshed/internal/githubapp"
 	"github.com/dominikpalatynski/toolshed/internal/jobs"
 	applog "github.com/dominikpalatynski/toolshed/internal/log"
 	"github.com/dominikpalatynski/toolshed/internal/runtime/dockercompose"
 	"github.com/dominikpalatynski/toolshed/internal/store"
-	"github.com/dominikpalatynski/toolshed/internal/triggers"
 	"github.com/dominikpalatynski/toolshed/internal/workspaces"
 )
 
 type Server struct {
-	cfg            *config.Config
-	logger         *slog.Logger
-	http           *http.Server
-	pool           *pgxpool.Pool
-	store          *store.Store
-	riverClient    *river.Client[pgx.Tx]
-	riverReady     atomic.Bool
-	githubResolver githubapp.Resolver
-	triggerCatalog *triggers.Catalog
+	cfg                        *config.Config
+	logger                     *slog.Logger
+	http                       *http.Server
+	pool                       *pgxpool.Pool
+	store                      *store.Store
+	riverClient                *river.Client[pgx.Tx]
+	riverReady                 atomic.Bool
+	githubResolver             githubapp.Resolver
+	automationRegistry         *automation.Registry
+	operationRequestHistoryHub *operationRequestHistoryHub
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -65,8 +66,18 @@ func New(cfg *config.Config) (*Server, error) {
 		DefaultServiceMemory: cfg.Runtime.DockerCompose.DefaultServiceMemory,
 		DefaultServicePIDs:   cfg.Runtime.DockerCompose.DefaultServicePIDs,
 	})
-	workers, operationRequestWorker := jobs.NewWorkers(pingStore, logger, githubClient, workspaceManager, runtimeBackend)
+	automationRegistry := automation.NewRegistry()
+	operationRequestHistoryHub := newOperationRequestHistoryHub()
+	workers, operationRequestWorker := jobs.NewWorkers(
+		pingStore,
+		logger,
+		githubClient,
+		workspaceManager,
+		runtimeBackend,
+		automationRegistry,
+	)
 	operationRequestWorker.SetJobTimeout(cfg.Jobs.OperationRequestTimeout)
+	operationRequestWorker.SetHistoryPublisher(operationRequestHistoryHub)
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger: logger,
 		Queues: map[string]river.QueueConfig{
@@ -82,13 +93,14 @@ func New(cfg *config.Config) (*Server, error) {
 
 	r := chi.NewRouter()
 	s := &Server{
-		cfg:            cfg,
-		logger:         logger,
-		pool:           pool,
-		store:          pingStore,
-		riverClient:    riverClient,
-		githubResolver: githubClient,
-		triggerCatalog: triggers.NewCatalog(),
+		cfg:                        cfg,
+		logger:                     logger,
+		pool:                       pool,
+		store:                      pingStore,
+		riverClient:                riverClient,
+		githubResolver:             githubClient,
+		automationRegistry:         automationRegistry,
+		operationRequestHistoryHub: operationRequestHistoryHub,
 	}
 	s.mount(r)
 

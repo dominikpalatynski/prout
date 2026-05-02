@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -11,6 +12,8 @@ import (
 	runtimebackend "github.com/dominikpalatynski/toolshed/internal/runtime"
 	"github.com/dominikpalatynski/toolshed/internal/store/sqlc"
 )
+
+const runtimeDeploymentTeardownTimeout = 2 * time.Minute
 
 func (w *OperationRequestWorker) handlePreviewStart(ctx context.Context, operationRequest sqlc.OperationRequests) error {
 	snapshot, err := operations.ParsePreviewStartSnapshot(operationRequest.IntentSnapshotJson)
@@ -36,13 +39,16 @@ func (w *OperationRequestWorker) startPreviewStart(
 	operationRequest sqlc.OperationRequests,
 	snapshot operations.PreviewStartSnapshot,
 ) (bool, error) {
+	ctx = w.withHistoryAfterCommit(ctx)
+
 	completed := false
 
 	err := w.store.Tx(ctx, func(q *sqlc.Queries, tx pgx.Tx) error {
-		runtimeEnvironmentType, err := operations.RuntimeEnvironmentTypeForOperation(operationRequest.OperationType)
+		operationDefinition, err := w.automationRegistry.OperationByKey(operationRequest.OperationType)
 		if err != nil {
 			return err
 		}
+		runtimeEnvironmentType := operationDefinition.RuntimeEnvironmentType
 
 		sameTargetEnvironment, err := q.GetLatestRuntimeEnvironmentByTarget(ctx, sqlc.GetLatestRuntimeEnvironmentByTargetParams{
 			RepositoryID:          operationRequest.RepositoryID,
@@ -198,6 +204,8 @@ func (w *OperationRequestWorker) completePreparedPreviewStart(
 	operationRequest sqlc.OperationRequests,
 	runtimeEnvironment sqlc.RuntimeEnvironments,
 ) error {
+	ctx = w.withHistoryAfterCommit(ctx)
+
 	artifactsExist, err := w.preparedArtifactsExistForReuse(ctx, runtimeEnvironment)
 	if err != nil {
 		return err
@@ -225,6 +233,8 @@ func (w *OperationRequestWorker) runSourceMaterializationStep(
 	snapshot operations.PreviewStartSnapshot,
 	runtimeEnvironment sqlc.RuntimeEnvironments,
 ) error {
+	ctx = w.withHistoryAfterCommit(ctx)
+
 	currentRequest := operationRequest
 	if currentRequest.CurrentStepState == operations.StepStatePending {
 		if err := w.store.Tx(ctx, func(q *sqlc.Queries, _ pgx.Tx) error {
@@ -301,6 +311,8 @@ func (w *OperationRequestWorker) advanceSourceMaterializationStep(
 	operationRequest sqlc.OperationRequests,
 	runtimeEnvironment sqlc.RuntimeEnvironments,
 ) error {
+	ctx = w.withHistoryAfterCommit(ctx)
+
 	return w.store.Tx(ctx, func(q *sqlc.Queries, _ pgx.Tx) error {
 		currentRuntimeEnvironment, err := q.GetRuntimeEnvironmentByID(ctx, runtimeEnvironment.ID)
 		if err != nil {
@@ -328,6 +340,8 @@ func (w *OperationRequestWorker) runComposePreparationStep(
 	operationRequest sqlc.OperationRequests,
 	runtimeEnvironment sqlc.RuntimeEnvironments,
 ) error {
+	ctx = w.withHistoryAfterCommit(ctx)
+
 	currentRequest := operationRequest
 	if currentRequest.CurrentStepState == operations.StepStatePending {
 		if err := w.store.Tx(ctx, func(q *sqlc.Queries, _ pgx.Tx) error {
@@ -414,6 +428,8 @@ func (w *OperationRequestWorker) runRuntimeDeploymentStep(
 	operationRequest sqlc.OperationRequests,
 	runtimeEnvironment sqlc.RuntimeEnvironments,
 ) error {
+	ctx = w.withHistoryAfterCommit(ctx)
+
 	currentRequest := operationRequest
 	if currentRequest.CurrentStepState == operations.StepStatePending {
 		if err := w.store.Tx(ctx, func(q *sqlc.Queries, _ pgx.Tx) error {
@@ -451,7 +467,10 @@ func (w *OperationRequestWorker) runRuntimeDeploymentStep(
 		Workspace:  workspace,
 		Deployment: deploymentRecord,
 	}); err != nil {
-		if teardownErr := w.runtimeBackend.Teardown(ctx, runtimebackend.TeardownRequest{
+		teardownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtimeDeploymentTeardownTimeout)
+		defer cancel()
+
+		if teardownErr := w.runtimeBackend.Teardown(teardownCtx, runtimebackend.TeardownRequest{
 			Workspace:  workspace,
 			Deployment: deploymentRecord,
 		}); teardownErr != nil {
@@ -499,6 +518,8 @@ func (w *OperationRequestWorker) handleSupersededPreviewStart(
 	operationRequest sqlc.OperationRequests,
 	runtimeEnvironment sqlc.RuntimeEnvironments,
 ) error {
+	ctx = w.withHistoryAfterCommit(ctx)
+
 	return w.store.Tx(ctx, func(q *sqlc.Queries, _ pgx.Tx) error {
 		return w.completeOperationRequestTx(ctx, q, operationRequest, &runtimeEnvironment.ID, operations.OutcomeAttemptSuperseded, operations.StepStatus{
 			Name:  operationRequest.CurrentStep,

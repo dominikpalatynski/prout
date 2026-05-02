@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/dominikpalatynski/toolshed/internal/automation"
 	"github.com/dominikpalatynski/toolshed/internal/operations"
 	"github.com/dominikpalatynski/toolshed/internal/store/sqlc"
 	"github.com/dominikpalatynski/toolshed/internal/testdb"
@@ -50,10 +51,7 @@ func TestGetWebhookEventDetailHydratesOperationRequestsWithRuntimeEnvironment(t 
 
 	trigger, err := appStore.Q().UpsertRepositoryTrigger(ctx, sqlc.UpsertRepositoryTriggerParams{
 		RepositoryID: repository.ID,
-		Type:         "pull_request_opened",
-		EventFamily:  "pull_request.opened",
-		IdentityKey:  "pull_request_opened",
-		ConfigJson:   []byte(`{}`),
+		Type:         automation.TriggerTypePreviewOnPullRequestOpened,
 		Enabled:      true,
 	})
 	if err != nil {

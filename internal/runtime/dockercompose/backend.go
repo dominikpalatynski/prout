@@ -606,6 +606,12 @@ func classifyComposeError(action string, err error, defaultPermanent bool) error
 	switch {
 	case errors.Is(err, exec.ErrNotFound):
 		classified = runtime.RetryableError(fmt.Errorf("docker is not installed or not in PATH: %w", err))
+	case errors.Is(err, context.DeadlineExceeded):
+		classified = runtime.RetryableError(fmt.Errorf("docker compose %s exceeded the operation request timeout: %w", action, err))
+	case errors.Is(err, context.Canceled):
+		classified = runtime.RetryableError(fmt.Errorf("docker compose %s was canceled before completion: %w", action, err))
+	case containsMissingExternalNetworkError(message):
+		classified = runtime.PermanentError(fmt.Errorf("docker compose %s could not find the configured external ingress network; create it or update runtime.ingress_network: %w", action, err))
 	case containsInfrastructureComposeError(message):
 		classified = runtime.RetryableError(fmt.Errorf("docker compose %s failed due to runtime infrastructure: %w", action, err))
 	case defaultPermanent:
@@ -617,12 +623,20 @@ func classifyComposeError(action string, err error, defaultPermanent bool) error
 	return classified
 }
 
+func containsMissingExternalNetworkError(message string) bool {
+	lower := strings.ToLower(message)
+
+	return strings.Contains(lower, "declared as external, but could not be found") ||
+		strings.Contains(lower, "no such network")
+}
+
 func containsInfrastructureComposeError(message string) bool {
 	lower := strings.ToLower(message)
 
 	return strings.Contains(lower, "not a docker command") ||
 		strings.Contains(lower, "docker daemon") ||
 		strings.Contains(lower, "permission denied") ||
+		strings.Contains(lower, "requires buildx plugin") ||
 		strings.Contains(lower, "cannot connect") ||
 		strings.Contains(lower, "connection refused") ||
 		strings.Contains(lower, "dial unix")
@@ -647,6 +661,12 @@ func (execCommandRunner) Run(ctx context.Context, dir string, args []string) ([]
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if trimmed := strings.TrimSpace(string(output)); trimmed != "" {
+				return output, fmt.Errorf("%w: %s", ctxErr, trimmed)
+			}
+			return output, ctxErr
+		}
 		return output, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return output, nil

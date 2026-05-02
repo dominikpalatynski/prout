@@ -21,12 +21,6 @@ import (
 	"github.com/dominikpalatynski/toolshed/internal/store/sqlc"
 )
 
-func (s *Server) listTriggerTypes(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"trigger_types": s.triggerCatalog.Definitions(),
-	})
-}
-
 func (s *Server) registerRepository(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		FullName string `json:"full_name"`
@@ -38,7 +32,7 @@ func (s *Server) registerRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	repository, err := s.githubResolver.ResolveRepository(r.Context(), request.FullName)
+	githubRepository, err := s.githubResolver.ResolveRepository(r.Context(), request.FullName)
 	if err != nil {
 		var apiErr *githubapp.APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
@@ -56,16 +50,16 @@ func (s *Server) registerRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := applog.WithGitHubRepositoryID(r.Context(), repository.GithubRepositoryID)
+	ctx := applog.WithGitHubRepositoryID(r.Context(), githubRepository.GithubRepositoryID)
 
 	record, err := s.store.Q().UpsertRepository(ctx, sqlc.UpsertRepositoryParams{
-		GithubRepositoryID:   repository.GithubRepositoryID,
-		GithubInstallationID: repository.GithubInstallationID,
-		Owner:                repository.Owner,
-		Name:                 repository.Name,
-		FullName:             repository.FullName,
-		HtmlUrl:              repository.HTMLURL,
-		IsPrivate:            repository.IsPrivate,
+		GithubRepositoryID:   githubRepository.GithubRepositoryID,
+		GithubInstallationID: githubRepository.GithubInstallationID,
+		Owner:                githubRepository.Owner,
+		Name:                 githubRepository.Name,
+		FullName:             githubRepository.FullName,
+		HtmlUrl:              githubRepository.HTMLURL,
+		IsPrivate:            githubRepository.IsPrivate,
 	})
 	if err != nil {
 		s.logger.ErrorContext(ctx, "upsert repository failed", "error", err, "full_name", request.FullName)
@@ -75,8 +69,17 @@ func (s *Server) registerRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	repositoryRecord := store.RepositoryFromUpsertRow(record)
+	if err := s.ensureRepositoryEventFamilies(ctx, repositoryRecord.ID); err != nil {
+		s.logger.ErrorContext(ctx, "ensure repository event families failed", "error", err, "repository_id", repositoryRecord.ID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "failed to seed repository event families",
+		})
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"repository": repositoryResponseFromModel(store.RepositoryFromUpsertRow(record)),
+		"repository": repositoryResponseFromModel(repositoryRecord),
 	})
 }
 
@@ -359,181 +362,6 @@ func (s *Server) putRepositoryEnvironmentVariables(w http.ResponseWriter, r *htt
 	})
 }
 
-func (s *Server) listRepositoryTriggers(w http.ResponseWriter, r *http.Request) {
-	repositoryID, err := pathInt64(r, "repositoryID")
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	ctx := applog.WithRepoID(r.Context(), repositoryID)
-
-	if _, err := s.store.Q().GetRepositoryByID(ctx, repositoryID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{
-				"error": "repository not found",
-			})
-			return
-		}
-		s.logger.ErrorContext(ctx, "get repository failed", "error", err, "repository_id", repositoryID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to load repository",
-		})
-		return
-	}
-
-	triggers, err := s.store.Q().ListRepositoryTriggers(ctx, repositoryID)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "list repository triggers failed", "error", err, "repository_id", repositoryID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to list repository triggers",
-		})
-		return
-	}
-
-	response := make([]triggerResponse, 0, len(triggers))
-	for _, trigger := range triggers {
-		response = append(response, triggerResponseFromModel(trigger))
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"triggers": response,
-	})
-}
-
-func (s *Server) upsertRepositoryTrigger(w http.ResponseWriter, r *http.Request) {
-	repositoryID, err := pathInt64(r, "repositoryID")
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	ctx := applog.WithRepoID(r.Context(), repositoryID)
-
-	if _, err := s.store.Q().GetRepositoryByID(ctx, repositoryID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{
-				"error": "repository not found",
-			})
-			return
-		}
-		s.logger.ErrorContext(ctx, "get repository failed", "error", err, "repository_id", repositoryID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to load repository",
-		})
-		return
-	}
-
-	var request struct {
-		Type    string          `json:"type"`
-		Config  json.RawMessage `json:"config"`
-		Enabled *bool           `json:"enabled"`
-	}
-	if err := decodeJSONBody(w, r, &request); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	validatedTrigger, err := s.triggerCatalog.ValidateAndNormalize(request.Type, request.Config)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	enabled := true
-	if request.Enabled != nil {
-		enabled = *request.Enabled
-	}
-
-	record, err := s.store.Q().UpsertRepositoryTrigger(ctx, sqlc.UpsertRepositoryTriggerParams{
-		RepositoryID: repositoryID,
-		Type:         validatedTrigger.Type,
-		EventFamily:  validatedTrigger.EventFamily,
-		IdentityKey:  validatedTrigger.IdentityKey,
-		ConfigJson:   validatedTrigger.ConfigJSON,
-		Enabled:      enabled,
-	})
-	if err != nil {
-		s.logger.ErrorContext(ctx, "upsert repository trigger failed", "error", err, "repository_id", repositoryID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to persist repository trigger",
-		})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"trigger": triggerResponseFromModel(record),
-	})
-}
-
-func (s *Server) patchRepositoryTrigger(w http.ResponseWriter, r *http.Request) {
-	repositoryID, err := pathInt64(r, "repositoryID")
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	ctx := applog.WithRepoID(r.Context(), repositoryID)
-
-	triggerID, err := pathInt64(r, "triggerID")
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	var request struct {
-		Enabled *bool `json:"enabled"`
-	}
-	if err := decodeJSONBody(w, r, &request); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
-		return
-	}
-	if request.Enabled == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "enabled is required",
-		})
-		return
-	}
-
-	record, err := s.store.Q().SetRepositoryTriggerEnabled(ctx, sqlc.SetRepositoryTriggerEnabledParams{
-		RepositoryID: repositoryID,
-		ID:           triggerID,
-		Enabled:      *request.Enabled,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{
-				"error": "repository trigger not found",
-			})
-			return
-		}
-
-		s.logger.ErrorContext(ctx, "set repository trigger enabled failed", "error", err, "repository_id", repositoryID, "trigger_id", triggerID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to update repository trigger",
-		})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"trigger": triggerResponseFromModel(record),
-	})
-}
-
 func (s *Server) listWebhookEvents(w http.ResponseWriter, r *http.Request) {
 	limit, err := queryLimit(r, 50, 200)
 	if err != nil {
@@ -691,18 +519,6 @@ type repositoryEnvironmentVariableResponse struct {
 	Value string `json:"value"`
 }
 
-type triggerResponse struct {
-	ID           int64           `json:"id"`
-	RepositoryID int64           `json:"repository_id"`
-	Type         string          `json:"type"`
-	EventFamily  string          `json:"event_family"`
-	IdentityKey  string          `json:"identity_key"`
-	Config       json.RawMessage `json:"config"`
-	Enabled      bool            `json:"enabled"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
-}
-
 type webhookEventResponse struct {
 	ID                 int64           `json:"id"`
 	DeliveryID         string          `json:"delivery_id"`
@@ -828,20 +644,6 @@ func repositoryEnvironmentVariableResponsesFromModels(
 		})
 	}
 	return response
-}
-
-func triggerResponseFromModel(record sqlc.RepositoryTriggers) triggerResponse {
-	return triggerResponse{
-		ID:           record.ID,
-		RepositoryID: record.RepositoryID,
-		Type:         record.Type,
-		EventFamily:  record.EventFamily,
-		IdentityKey:  record.IdentityKey,
-		Config:       append(json.RawMessage(nil), record.ConfigJson...),
-		Enabled:      record.Enabled,
-		CreatedAt:    mustTime(record.CreatedAt),
-		UpdatedAt:    mustTime(record.UpdatedAt),
-	}
 }
 
 func webhookEventResponseFromModel(record sqlc.WebhookEvents, includePayload bool) webhookEventResponse {

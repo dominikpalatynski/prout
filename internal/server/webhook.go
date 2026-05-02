@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/dominikpalatynski/toolshed/internal/automation"
 	"github.com/dominikpalatynski/toolshed/internal/jobs"
 	applog "github.com/dominikpalatynski/toolshed/internal/log"
 	"github.com/dominikpalatynski/toolshed/internal/operations"
@@ -73,14 +74,17 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if delivery.Supported {
-		ctx = applog.WithPRNumber(ctx, delivery.Event.PRNumber)
+	eventFamily, supported := s.automationRegistry.ResolveEventFamily(delivery)
+	if !supported {
+		s.writeIgnoredWebhookResponse(w, ctx, delivery, "unsupported_event_type")
+		return
 	}
 
-	if !delivery.Supported {
-		ignoredEvent, duplicate, err := s.persistIgnoredVerifiedDelivery(ctx, delivery, "unsupported_event_type")
-		if err != nil {
-			s.logger.ErrorContext(ctx, "persist ignored webhook event failed", "error", err)
+	event, applicable, err := eventFamily.Normalize(delivery)
+	if err != nil {
+		failedEvent, duplicate, persistErr := s.persistFailedVerifiedDelivery(ctx, delivery, err.Error())
+		if persistErr != nil {
+			s.logger.ErrorContext(ctx, "persist failed webhook event failed", "error", persistErr)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
 				"error": "failed to persist webhook event",
 			})
@@ -93,15 +97,21 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"status":           ignoredEvent.Status,
-			"webhook_event_id": ignoredEvent.ID,
-			"ignored_reason":   ignoredEvent.IgnoredReason,
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"status":           "failed",
+			"webhook_event_id": failedEvent.ID,
+			"error":            err.Error(),
 		})
 		return
 	}
+	if !applicable {
+		s.writeIgnoredWebhookResponse(w, ctx, delivery, "unsupported_event_type")
+		return
+	}
 
-	result, err := s.processSupportedVerifiedDelivery(ctx, delivery)
+	ctx = applog.WithPRNumber(ctx, event.PRNumber)
+
+	result, err := s.processSupportedVerifiedDelivery(ctx, delivery, eventFamily, event)
 	if result.Event.RepositoryID != nil {
 		ctx = applog.WithRepoID(ctx, *result.Event.RepositoryID)
 	}
@@ -119,7 +129,14 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if result.ProcessingError != nil {
-		s.logger.ErrorContext(ctx, "supported webhook delivery failed", "error", result.ProcessingError, "webhook_event_id", result.Event.ID)
+		s.logger.ErrorContext(
+			ctx,
+			"supported webhook delivery failed",
+			"error",
+			result.ProcessingError,
+			"webhook_event_id",
+			result.Event.ID,
+		)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"status":           result.Event.Status,
 			"webhook_event_id": result.Event.ID,
@@ -149,7 +166,39 @@ type webhookProcessResult struct {
 	ProcessingError       error
 }
 
-func (s *Server) persistIgnoredVerifiedDelivery(ctx context.Context, delivery webhook.Delivery, ignoredReason string) (sqlc.WebhookEvents, bool, error) {
+func (s *Server) writeIgnoredWebhookResponse(
+	w http.ResponseWriter,
+	ctx context.Context,
+	delivery webhook.Delivery,
+	ignoredReason string,
+) {
+	ignoredEvent, duplicate, err := s.persistIgnoredVerifiedDelivery(ctx, delivery, ignoredReason)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "persist ignored webhook event failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "failed to persist webhook event",
+		})
+		return
+	}
+	if duplicate {
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status": "duplicate",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"status":           ignoredEvent.Status,
+		"webhook_event_id": ignoredEvent.ID,
+		"ignored_reason":   ignoredEvent.IgnoredReason,
+	})
+}
+
+func (s *Server) persistIgnoredVerifiedDelivery(
+	ctx context.Context,
+	delivery webhook.Delivery,
+	ignoredReason string,
+) (sqlc.WebhookEvents, bool, error) {
 	var (
 		event     sqlc.WebhookEvents
 		duplicate bool
@@ -183,7 +232,11 @@ func (s *Server) persistIgnoredVerifiedDelivery(ctx context.Context, delivery we
 	return event, duplicate, err
 }
 
-func (s *Server) persistFailedVerifiedDelivery(ctx context.Context, delivery webhook.Delivery, failureMessage string) (sqlc.WebhookEvents, bool, error) {
+func (s *Server) persistFailedVerifiedDelivery(
+	ctx context.Context,
+	delivery webhook.Delivery,
+	failureMessage string,
+) (sqlc.WebhookEvents, bool, error) {
 	var (
 		event     sqlc.WebhookEvents
 		duplicate bool
@@ -217,7 +270,12 @@ func (s *Server) persistFailedVerifiedDelivery(ctx context.Context, delivery web
 	return event, duplicate, err
 }
 
-func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery webhook.Delivery) (webhookProcessResult, error) {
+func (s *Server) processSupportedVerifiedDelivery(
+	ctx context.Context,
+	delivery webhook.Delivery,
+	eventFamily automation.EventFamilyDefinition,
+	event webhook.NormalizedEvent,
+) (webhookProcessResult, error) {
 	var result webhookProcessResult
 
 	err := s.store.Tx(ctx, func(q *sqlc.Queries, tx pgx.Tx) error {
@@ -253,7 +311,7 @@ func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery 
 			return err
 		}
 
-		repositoryRecord, err := q.GetRepositoryByGitHubRepositoryID(ctx, delivery.Event.GithubRepositoryID)
+		repositoryRecord, err := q.GetRepositoryByGitHubRepositoryID(ctx, event.GithubRepositoryID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				ignoredReason := "repository_not_registered"
@@ -286,7 +344,32 @@ func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery 
 			return nil
 		}
 
-		event, err := s.resolvePullRequestTarget(ctx, repositoryRecord, delivery.Event)
+		if err := s.ensureRepositoryEventFamiliesWithQueries(ctx, q, repositoryID); err != nil {
+			return markFailed(&repositoryID, fmt.Errorf("ensure repository event families: %w", err))
+		}
+
+		repositoryEventFamily, err := q.GetRepositoryEventFamily(ctx, sqlc.GetRepositoryEventFamilyParams{
+			RepositoryID:   repositoryID,
+			EventFamilyKey: eventFamily.Key,
+		})
+		if err != nil {
+			return markFailed(&repositoryID, fmt.Errorf("load repository event family %q: %w", eventFamily.Key, err))
+		}
+		if !repositoryEventFamily.Enabled {
+			ignoredReason := eventFamily.DisabledReason
+			updated, updateErr := q.MarkWebhookEventIgnored(ctx, sqlc.MarkWebhookEventIgnoredParams{
+				ID:            result.Event.ID,
+				RepositoryID:  &repositoryID,
+				IgnoredReason: &ignoredReason,
+			})
+			if updateErr != nil {
+				return updateErr
+			}
+			result.Event = updated
+			return nil
+		}
+
+		event, err := s.resolvePullRequestTarget(ctx, repositoryRecord, event)
 		if err != nil {
 			return markFailed(&repositoryID, fmt.Errorf("resolve pull request target: %w", err))
 		}
@@ -311,7 +394,15 @@ func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery 
 		}
 
 		for _, triggerRecord := range triggerRecords {
-			evaluation, err := s.triggerCatalog.Evaluate(triggerRecord, delivery.DeliveryID, event)
+			triggerType, err := s.automationRegistry.TriggerTypeByKey(triggerRecord.Type)
+			if err != nil {
+				return markFailed(&repositoryID, fmt.Errorf("resolve repository trigger %d: %w", triggerRecord.ID, err))
+			}
+			if triggerType.EventFamilyKey != eventFamily.Key {
+				continue
+			}
+
+			evaluation, err := s.automationRegistry.EvaluateRepositoryTrigger(triggerRecord, eventFamily.Key, event)
 			if err != nil {
 				return markFailed(&repositoryID, fmt.Errorf("evaluate repository trigger %d: %w", triggerRecord.ID, err))
 			}
@@ -327,20 +418,22 @@ func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery 
 				return markFailed(&repositoryID, fmt.Errorf("insert webhook event trigger evaluation: %w", err))
 			}
 
-			if evaluation.OperationIntent == nil {
+			if !evaluation.Matched {
 				continue
 			}
 
-			runtimeEnvironmentType, err := operations.RuntimeEnvironmentTypeForOperation(evaluation.OperationIntent.OperationType)
+			operationDefinition, err := s.automationRegistry.OperationByKey(evaluation.OperationType)
 			if err != nil {
-				return markFailed(&repositoryID, fmt.Errorf("resolve runtime environment type for operation %q: %w", evaluation.OperationIntent.OperationType, err))
+				return markFailed(&repositoryID, fmt.Errorf("resolve operation definition %q: %w", evaluation.OperationType, err))
 			}
-			initialStep, err := operations.InitialStepForOperation(evaluation.OperationIntent.OperationType)
-			if err != nil {
-				return markFailed(&repositoryID, fmt.Errorf("resolve initial step for operation %q: %w", evaluation.OperationIntent.OperationType, err))
+			if operationDefinition.BuildTriggerIntentSnapshot == nil {
+				return markFailed(&repositoryID, fmt.Errorf(
+					"operation type %q does not support trigger intent snapshots",
+					evaluation.OperationType,
+				))
 			}
 
-			intentSnapshotJSON, err := operations.BuildTriggerSnapshot(operations.TriggerSnapshotInput{
+			intentSnapshotJSON, err := operationDefinition.BuildTriggerIntentSnapshot(operations.PreviewStartSnapshotInput{
 				RepositoryID:           repositoryRecord.ID,
 				PullRequestID:          pullRequestRecord.ID,
 				PRNumber:               pullRequestRecord.PRNumber,
@@ -350,9 +443,8 @@ func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery 
 				Event:                  event,
 				TriggerID:              triggerRecord.ID,
 				TriggerType:            triggerRecord.Type,
-				TriggerIdentityKey:     triggerRecord.IdentityKey,
-				OperationType:          evaluation.OperationIntent.OperationType,
-				RuntimeEnvironmentType: runtimeEnvironmentType,
+				OperationType:          evaluation.OperationType,
+				RuntimeEnvironmentType: operationDefinition.RuntimeEnvironmentType,
 				TargetPRHeadCommitSHA:  event.PRHeadSHA,
 			})
 			if err != nil {
@@ -367,13 +459,13 @@ func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery 
 				PullRequestID:                   pullRequestRecord.ID,
 				RuntimeEnvironmentID:            nil,
 				TargetRuntimeEnvironmentID:      nil,
-				OperationType:                   evaluation.OperationIntent.OperationType,
+				OperationType:                   evaluation.OperationType,
 				Source:                          operations.SourceTrigger,
 				Status:                          operations.StatusQueued,
 				TargetPrHeadCommitSha:           event.PRHeadSHA,
 				IntentSnapshotJson:              intentSnapshotJSON,
-				CurrentStep:                     initialStep.Name,
-				CurrentStepState:                initialStep.State,
+				CurrentStep:                     operationDefinition.InitialStep.Name,
+				CurrentStepState:                operationDefinition.InitialStep.State,
 				CurrentStepDetailsJson:          nil,
 			})
 			if err != nil {
@@ -403,7 +495,22 @@ func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery 
 	return result, err
 }
 
-func (s *Server) resolvePullRequestTarget(ctx context.Context, repository sqlc.Repositories, event webhook.NormalizedEvent) (webhook.NormalizedEvent, error) {
+func (s *Server) ensureRepositoryEventFamiliesWithQueries(
+	ctx context.Context,
+	q *sqlc.Queries,
+	repositoryID int64,
+) error {
+	return q.EnsureRepositoryEventFamilies(ctx, sqlc.EnsureRepositoryEventFamiliesParams{
+		RepositoryID:    repositoryID,
+		EventFamilyKeys: s.automationRegistry.SupportedEventFamilyKeys(),
+	})
+}
+
+func (s *Server) resolvePullRequestTarget(
+	ctx context.Context,
+	repository sqlc.Repositories,
+	event webhook.NormalizedEvent,
+) (webhook.NormalizedEvent, error) {
 	if strings.TrimSpace(event.PRHeadSHA) != "" && event.PRSourceRepository.IsComplete() {
 		return event, nil
 	}
@@ -411,7 +518,13 @@ func (s *Server) resolvePullRequestTarget(ctx context.Context, repository sqlc.R
 		return webhook.NormalizedEvent{}, errors.New("github resolver is unavailable")
 	}
 
-	pullRequest, err := s.githubResolver.ResolvePullRequest(ctx, repository.Owner, repository.Name, repository.GithubInstallationID, event.PRNumber)
+	pullRequest, err := s.githubResolver.ResolvePullRequest(
+		ctx,
+		repository.Owner,
+		repository.Name,
+		repository.GithubInstallationID,
+		event.PRNumber,
+	)
 	if err != nil {
 		return webhook.NormalizedEvent{}, err
 	}

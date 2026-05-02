@@ -11,7 +11,7 @@ import (
 
 const (
 	DefaultGitHubAPITimeout           = 10 * time.Second
-	DefaultOperationRequestJobTimeout = 10 * time.Minute
+	DefaultOperationRequestJobTimeout = 30 * time.Minute
 )
 
 type Config struct {

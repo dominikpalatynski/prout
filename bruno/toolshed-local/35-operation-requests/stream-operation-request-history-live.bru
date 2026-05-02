@@ -1,0 +1,16 @@
+meta {
+  name: Stream Operation Request History Live
+  type: http
+  seq: 18
+}
+
+get {
+  url: {{baseUrl}}/api/operation-requests/{{operationRequestId}}/history/live
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{operatorToken}}
+  Accept: text/event-stream
+}

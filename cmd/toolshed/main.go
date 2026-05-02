@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -34,7 +35,7 @@ func root() *cobra.Command {
 		Short:   "Self-hosted GitHub preview environments",
 		Version: version,
 	}
-	cmd.AddCommand(serverCmd(), migrateCmd())
+	cmd.AddCommand(serverCmd(), migrateCmd(), dbCmd())
 	return cmd
 }
 
@@ -77,13 +78,44 @@ func migrateCmd() *cobra.Command {
 	return cmd
 }
 
+func dbCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "db",
+		Short: "Run database maintenance commands",
+	}
+	cmd.AddCommand(dbCleanupCmd())
+	return cmd
+}
+
+func dbCleanupCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "cleanup",
+		Short: "Delete all records without dropping the schema",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return withDB(cmd.Context(), func(db *sql.DB) error {
+				tables, err := cleanupAllRecords(cmd.Context(), db)
+				if err != nil {
+					return fmt.Errorf("cleanup db: %w", err)
+				}
+				if len(tables) == 0 {
+					fmt.Println("no tables to clean")
+					return nil
+				}
+				fmt.Printf("cleaned %d tables\n", len(tables))
+				return nil
+			})
+		},
+	}
+}
+
 func migrateUpCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "up",
 		Short: "Apply pending migrations",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withMigrationDB(cmd.Context(), func(db *sql.DB) error {
+			return withDB(cmd.Context(), func(db *sql.DB) error {
 				results, err := migrations.Up(cmd.Context(), db)
 				if err != nil {
 					return fmt.Errorf("migrate up: %w", err)
@@ -107,7 +139,7 @@ func migrateDownCmd() *cobra.Command {
 		Short: "Roll back one migration",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withMigrationDB(cmd.Context(), func(db *sql.DB) error {
+			return withDB(cmd.Context(), func(db *sql.DB) error {
 				result, err := migrations.Down(cmd.Context(), db)
 				if err != nil {
 					return fmt.Errorf("migrate down: %w", err)
@@ -129,7 +161,7 @@ func migrateStatusCmd() *cobra.Command {
 		Short: "Show migration status",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withMigrationDB(cmd.Context(), func(db *sql.DB) error {
+			return withDB(cmd.Context(), func(db *sql.DB) error {
 				statuses, err := migrations.Status(cmd.Context(), db)
 				if err != nil {
 					return fmt.Errorf("migrate status: %w", err)
@@ -154,7 +186,7 @@ func migrateVersionCmd() *cobra.Command {
 		Short: "Show current and target migration versions",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withMigrationDB(cmd.Context(), func(db *sql.DB) error {
+			return withDB(cmd.Context(), func(db *sql.DB) error {
 				current, target, err := migrations.Versions(cmd.Context(), db)
 				if err != nil {
 					return fmt.Errorf("migrate version: %w", err)
@@ -166,7 +198,63 @@ func migrateVersionCmd() *cobra.Command {
 	}
 }
 
-func withMigrationDB(ctx context.Context, fn func(*sql.DB) error) error {
+func cleanupAllRecords(ctx context.Context, db *sql.DB) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Preserve migration bookkeeping so the existing schema remains recognized as up to date.
+	rows, err := tx.QueryContext(ctx, `
+		SELECT format('%I.%I', n.nspname, c.relname)
+		FROM pg_catalog.pg_class AS c
+		INNER JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+		WHERE c.relkind IN ('r', 'p')
+		  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+		  AND n.nspname NOT LIKE 'pg_toast%'
+		  AND c.relname NOT IN ('goose_db_version', 'river_migration')
+		ORDER BY n.nspname, c.relname
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list tables: %w", err)
+	}
+	defer rows.Close()
+
+	var tables []string
+	for rows.Next() {
+		var table string
+		if err := rows.Scan(&table); err != nil {
+			return nil, fmt.Errorf("scan table: %w", err)
+		}
+		tables = append(tables, table)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tables: %w", err)
+	}
+	if len(tables) == 0 {
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit empty cleanup tx: %w", err)
+		}
+		return nil, nil
+	}
+
+	query := "TRUNCATE TABLE " + strings.Join(tables, ", ") + " RESTART IDENTITY CASCADE"
+	if _, err := tx.ExecContext(ctx, query); err != nil {
+		return nil, fmt.Errorf("truncate tables: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit cleanup tx: %w", err)
+	}
+
+	return tables, nil
+}
+
+func withDB(ctx context.Context, fn func(*sql.DB) error) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
