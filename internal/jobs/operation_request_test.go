@@ -5,6 +5,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -19,6 +22,7 @@ import (
 	"github.com/dominikpalatynski/toolshed/internal/config"
 	"github.com/dominikpalatynski/toolshed/internal/operations"
 	"github.com/dominikpalatynski/toolshed/internal/pullrequests"
+	runtimebackend "github.com/dominikpalatynski/toolshed/internal/runtime"
 	"github.com/dominikpalatynski/toolshed/internal/store"
 	"github.com/dominikpalatynski/toolshed/internal/store/sqlc"
 	"github.com/dominikpalatynski/toolshed/internal/testdb"
@@ -380,6 +384,218 @@ func TestOperationRequestWorkerPreviewStartRepairsMissingPreparedWorkspace(t *te
 	}
 }
 
+func TestOperationRequestWorkerPreviewStartRuntimeDeploymentRetryReusesFrozenInput(t *testing.T) {
+	pool := testdb.Start(t)
+	appStore := store.New(pool)
+	worker, _ := newTestWorker(t, appStore, []downloadResult{
+		{tarball: mustBuildTarball(t, map[string]string{"README.md": "first\n"})},
+	})
+
+	backend := worker.runtimeBackend.(*stubRuntimeBackend)
+	backend.deployErrors = []error{runtimebackend.RetryableError(io.ErrUnexpectedEOF)}
+
+	ctx := context.Background()
+	repository, pullRequest, sourceRepository := mustCreateRepositoryAndPullRequest(t, ctx, appStore, "abc123")
+
+	operationRequest := mustInsertPreviewStartOperationRequest(t, ctx, appStore, repository.ID, pullRequest.ID, sourceRepository, "abc123")
+	if err := worker.Work(ctx, testJob(operationRequest.ID, 1, 2)); err == nil {
+		t.Fatalf("first Work() error = nil, want non-nil")
+	}
+
+	afterFirstAttempt, err := appStore.Q().GetOperationRequestByID(ctx, operationRequest.ID)
+	if err != nil {
+		t.Fatalf("GetOperationRequestByID(after first attempt) error = %v", err)
+	}
+	if afterFirstAttempt.CurrentStep != operations.StepRuntimeDeployment {
+		t.Fatalf("current_step after first attempt = %q, want %q", afterFirstAttempt.CurrentStep, operations.StepRuntimeDeployment)
+	}
+	if afterFirstAttempt.CurrentStepState != operations.StepStateInProgress {
+		t.Fatalf("current_step_state after first attempt = %q, want %q", afterFirstAttempt.CurrentStepState, operations.StepStateInProgress)
+	}
+
+	if err := worker.Work(ctx, testJob(operationRequest.ID, 2, 2)); err != nil {
+		t.Fatalf("second Work() error = %v", err)
+	}
+
+	handled, err := appStore.Q().GetOperationRequestByID(ctx, operationRequest.ID)
+	if err != nil {
+		t.Fatalf("GetOperationRequestByID(handled) error = %v", err)
+	}
+	if handled.Outcome == nil || *handled.Outcome != operations.OutcomeNewAttemptCreated {
+		t.Fatalf("outcome after retry = %v, want %q", handled.Outcome, operations.OutcomeNewAttemptCreated)
+	}
+
+	if backend.prepareCalls != 1 {
+		t.Fatalf("prepareCalls = %d, want 1", backend.prepareCalls)
+	}
+	if backend.deployCalls != 2 {
+		t.Fatalf("deployCalls = %d, want 2", backend.deployCalls)
+	}
+	if backend.teardownCalls != 1 {
+		t.Fatalf("teardownCalls = %d, want 1", backend.teardownCalls)
+	}
+}
+
+func TestOperationRequestWorkerPreviewStartPermanentPreparationFailureFinalizesImmediately(t *testing.T) {
+	pool := testdb.Start(t)
+	appStore := store.New(pool)
+	worker, _ := newTestWorker(t, appStore, []downloadResult{
+		{tarball: mustBuildTarball(t, map[string]string{"README.md": "first\n"})},
+	})
+
+	backend := worker.runtimeBackend.(*stubRuntimeBackend)
+	backend.prepareErrors = []error{runtimebackend.PermanentError(errors.New("invalid compose configuration"))}
+
+	ctx := context.Background()
+	repository, pullRequest, sourceRepository := mustCreateRepositoryAndPullRequest(t, ctx, appStore, "abc123")
+
+	operationRequest := mustInsertPreviewStartOperationRequest(t, ctx, appStore, repository.ID, pullRequest.ID, sourceRepository, "abc123")
+	if err := worker.Work(ctx, testJob(operationRequest.ID, 1, 3)); err != nil {
+		t.Fatalf("Work() error = %v, want nil for immediate permanent finalization", err)
+	}
+
+	handled, err := appStore.Q().GetOperationRequestByID(ctx, operationRequest.ID)
+	if err != nil {
+		t.Fatalf("GetOperationRequestByID(handled) error = %v", err)
+	}
+	if handled.Status != operations.StatusFailed {
+		t.Fatalf("status = %q, want %q", handled.Status, operations.StatusFailed)
+	}
+	if handled.CurrentStep != operations.StepComposePreparation {
+		t.Fatalf("current_step = %q, want %q", handled.CurrentStep, operations.StepComposePreparation)
+	}
+	if handled.CurrentStepState != operations.StepStateFailed {
+		t.Fatalf("current_step_state = %q, want %q", handled.CurrentStepState, operations.StepStateFailed)
+	}
+
+	runtimeEnvironment, err := appStore.Q().GetRuntimeEnvironmentByID(ctx, *handled.RuntimeEnvironmentID)
+	if err != nil {
+		t.Fatalf("GetRuntimeEnvironmentByID() error = %v", err)
+	}
+	if runtimeEnvironment.Status != operations.RuntimeStatusFailed {
+		t.Fatalf("runtime environment status = %q, want %q", runtimeEnvironment.Status, operations.RuntimeStatusFailed)
+	}
+}
+
+func TestOperationRequestWorkerPreviewStartRepairsMissingPreparedDeploymentArtifact(t *testing.T) {
+	pool := testdb.Start(t)
+	appStore := store.New(pool)
+	enqueuer := &stubOperationRequestEnqueuer{}
+	worker, workspaceManager := newTestWorkerWithEnqueuer(t, appStore, []downloadResult{
+		{tarball: mustBuildTarball(t, map[string]string{"README.md": "first\n"})},
+		{tarball: mustBuildTarball(t, map[string]string{"README.md": "second\n"})},
+	}, enqueuer)
+
+	ctx := context.Background()
+	repository, pullRequest, sourceRepository := mustCreateRepositoryAndPullRequest(t, ctx, appStore, "abc123")
+
+	firstRequest := mustInsertPreviewStartOperationRequest(t, ctx, appStore, repository.ID, pullRequest.ID, sourceRepository, "abc123")
+	if err := worker.Work(ctx, testJob(firstRequest.ID, 1, 1)); err != nil {
+		t.Fatalf("first Work() error = %v", err)
+	}
+	firstHandled, err := appStore.Q().GetOperationRequestByID(ctx, firstRequest.ID)
+	if err != nil {
+		t.Fatalf("GetOperationRequestByID(first) error = %v", err)
+	}
+
+	deploymentRecord, err := appStore.Q().GetRuntimeEnvironmentDeploymentByRuntimeEnvironmentID(ctx, *firstHandled.RuntimeEnvironmentID)
+	if err != nil {
+		t.Fatalf("GetRuntimeEnvironmentDeploymentByRuntimeEnvironmentID() error = %v", err)
+	}
+	metadata, err := decodeStubDeploymentMetadata(deploymentRecordFromModel(deploymentRecord))
+	if err != nil {
+		t.Fatalf("decodeStubDeploymentMetadata() error = %v", err)
+	}
+
+	workspace, err := workspaceManager.OpenWorkspace("runtime-environments/" + fmt.Sprint(*firstHandled.RuntimeEnvironmentID))
+	if err != nil {
+		t.Fatalf("OpenWorkspace() error = %v", err)
+	}
+	artifactPath, err := workspace.ResolvePath(metadata.ArtifactPath)
+	if err != nil {
+		t.Fatalf("ResolvePath() error = %v", err)
+	}
+	if err := os.Remove(artifactPath); err != nil {
+		t.Fatalf("os.Remove() error = %v", err)
+	}
+
+	secondRequest := mustInsertPreviewStartOperationRequest(t, ctx, appStore, repository.ID, pullRequest.ID, sourceRepository, "abc123")
+	if err := worker.Work(ctx, testJob(secondRequest.ID, 1, 1)); err != nil {
+		t.Fatalf("second Work() error = %v", err)
+	}
+	secondHandled, err := appStore.Q().GetOperationRequestByID(ctx, secondRequest.ID)
+	if err != nil {
+		t.Fatalf("GetOperationRequestByID(second) error = %v", err)
+	}
+	if secondHandled.RuntimeEnvironmentID == nil || *secondHandled.RuntimeEnvironmentID == *firstHandled.RuntimeEnvironmentID {
+		t.Fatalf("second runtime_environment_id = %v, want a new runtime environment id", secondHandled.RuntimeEnvironmentID)
+	}
+
+	if len(enqueuer.operationRequestIDs) != 1 {
+		t.Fatalf("len(enqueued cleanup requests) = %d, want 1", len(enqueuer.operationRequestIDs))
+	}
+}
+
+func TestOperationRequestWorkerCleanupTeardownRunsBeforeWorkspaceCleanup(t *testing.T) {
+	pool := testdb.Start(t)
+	appStore := store.New(pool)
+	enqueuer := &stubOperationRequestEnqueuer{}
+	worker, workspaceManager := newTestWorkerWithEnqueuer(t, appStore, []downloadResult{
+		{tarball: mustBuildTarball(t, map[string]string{"README.md": "first\n"})},
+		{tarball: mustBuildTarball(t, map[string]string{"README.md": "second\n"})},
+	}, enqueuer)
+
+	ctx := context.Background()
+	repository, pullRequest, sourceRepository := mustCreateRepositoryAndPullRequest(t, ctx, appStore, "abc123")
+
+	firstRequest := mustInsertPreviewStartOperationRequest(t, ctx, appStore, repository.ID, pullRequest.ID, sourceRepository, "abc123")
+	if err := worker.Work(ctx, testJob(firstRequest.ID, 1, 1)); err != nil {
+		t.Fatalf("first Work() error = %v", err)
+	}
+	firstHandled, err := appStore.Q().GetOperationRequestByID(ctx, firstRequest.ID)
+	if err != nil {
+		t.Fatalf("GetOperationRequestByID(first) error = %v", err)
+	}
+
+	secondRequest := mustInsertPreviewStartOperationRequest(t, ctx, appStore, repository.ID, pullRequest.ID, sourceRepository, "def456")
+	if err := worker.Work(ctx, testJob(secondRequest.ID, 1, 1)); err != nil {
+		t.Fatalf("second Work() error = %v", err)
+	}
+
+	if len(enqueuer.operationRequestIDs) != 1 {
+		t.Fatalf("len(enqueued cleanup requests) = %d, want 1", len(enqueuer.operationRequestIDs))
+	}
+
+	cleanupRequest, err := appStore.Q().GetOperationRequestByID(ctx, enqueuer.operationRequestIDs[0])
+	if err != nil {
+		t.Fatalf("GetOperationRequestByID(cleanup) error = %v", err)
+	}
+	if cleanupRequest.CurrentStep != operations.StepRuntimeTeardown {
+		t.Fatalf("cleanup current_step = %q, want %q", cleanupRequest.CurrentStep, operations.StepRuntimeTeardown)
+	}
+
+	backend := worker.runtimeBackend.(*stubRuntimeBackend)
+	if err := worker.Work(ctx, testJob(cleanupRequest.ID, 1, 1)); err != nil {
+		t.Fatalf("cleanup Work() error = %v", err)
+	}
+
+	if backend.teardownCalls != 1 {
+		t.Fatalf("teardownCalls = %d, want 1", backend.teardownCalls)
+	}
+
+	firstRuntimeEnvironment, err := appStore.Q().GetRuntimeEnvironmentByID(ctx, *firstHandled.RuntimeEnvironmentID)
+	if err != nil {
+		t.Fatalf("GetRuntimeEnvironmentByID(first) error = %v", err)
+	}
+	workspaceExists, err := workspaceManager.WorkspaceExists(stringPtrValue(firstRuntimeEnvironment.WorkspaceLocator))
+	if err != nil {
+		t.Fatalf("WorkspaceExists(cleaned) error = %v", err)
+	}
+	if workspaceExists {
+		t.Fatalf("workspaceExists(cleaned) = true, want false")
+	}
+}
+
 func mustCreateRepositoryAndPullRequest(
 	t *testing.T,
 	ctx context.Context,
@@ -388,7 +604,7 @@ func mustCreateRepositoryAndPullRequest(
 ) (sqlc.Repositories, sqlc.PullRequests, pullrequests.SourceRepository) {
 	t.Helper()
 
-	repository, err := appStore.Q().UpsertRepository(ctx, sqlc.UpsertRepositoryParams{
+	repositoryRow, err := appStore.Q().UpsertRepository(ctx, sqlc.UpsertRepositoryParams{
 		GithubRepositoryID:   301,
 		GithubInstallationID: 401,
 		Owner:                "acme",
@@ -399,6 +615,15 @@ func mustCreateRepositoryAndPullRequest(
 	})
 	if err != nil {
 		t.Fatalf("UpsertRepository() error = %v", err)
+	}
+	repository := store.RepositoryFromUpsertRow(repositoryRow)
+	if _, err := appStore.Q().UpsertRepositoryRuntimeSettings(ctx, sqlc.UpsertRepositoryRuntimeSettingsParams{
+		RepositoryID:       repository.ID,
+		ComposeFilePath:    strPtr("compose.yml"),
+		ExposedServiceName: strPtr("app"),
+		ExposedServicePort: int32Ptr(8080),
+	}); err != nil {
+		t.Fatalf("UpsertRepositoryRuntimeSettings() error = %v", err)
 	}
 
 	sourceRepository := pullrequests.SourceRepository{
@@ -501,11 +726,13 @@ func newTestWorkerWithEnqueuer(
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	workspaceRoot := t.TempDir()
 	workspaceManager := workspaces.NewFilesystemManager(workspaceRoot)
+	runtimeBackend := &stubRuntimeBackend{}
 	worker := &OperationRequestWorker{
 		logger:           logger,
 		store:            appStore,
 		githubDownloader: &stubTarballDownloader{results: downloadResults},
 		workspaceManager: workspaceManager,
+		runtimeBackend:   runtimeBackend,
 		jobEnqueuer:      enqueuer,
 	}
 	return worker, workspaceManager
@@ -595,6 +822,10 @@ func int64Ptr(value int64) *int64 {
 	return &value
 }
 
+func int32Ptr(value int32) *int32 {
+	return &value
+}
+
 func TestFilesystemWorkspaceContent(t *testing.T) {
 	t.Parallel()
 
@@ -634,4 +865,117 @@ func TestFilesystemWorkspaceContent(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "runtime-environments", "42", "acme-demo-123")); !os.IsNotExist(err) {
 		t.Fatalf("tarball wrapper directory should not exist, stat error = %v", err)
 	}
+}
+
+type stubRuntimeBackend struct {
+	prepareErrors  []error
+	deployErrors   []error
+	teardownErrors []error
+	prepareCalls   int
+	deployCalls    int
+	teardownCalls  int
+}
+
+type stubDeploymentMetadata struct {
+	ArtifactPath string `json:"artifact_path"`
+}
+
+func (s *stubRuntimeBackend) Name() string {
+	return "stub"
+}
+
+func (s *stubRuntimeBackend) Prepare(
+	_ context.Context,
+	request runtimebackend.PrepareRequest,
+) (runtimebackend.DeploymentRecord, error) {
+	if err := s.nextPrepareError(); err != nil {
+		return runtimebackend.DeploymentRecord{}, err
+	}
+
+	metadata := stubDeploymentMetadata{
+		ArtifactPath: ".toolshed/runtime/rendered-compose.yml",
+	}
+	if err := request.Workspace.WriteFile(metadata.ArtifactPath, []byte("rendered\n"), 0o644); err != nil {
+		return runtimebackend.DeploymentRecord{}, err
+	}
+
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return runtimebackend.DeploymentRecord{}, err
+	}
+
+	return runtimebackend.DeploymentRecord{
+		Backend:                        s.Name(),
+		FrozenRuntimeSettingsJSON:      []byte(`{"compose_file_path":"compose.yml"}`),
+		FrozenEnvironmentVariablesJSON: []byte(`[]`),
+		MetadataJSON:                   metadataJSON,
+	}, nil
+}
+
+func (s *stubRuntimeBackend) PreparedArtifactsExist(
+	_ context.Context,
+	request runtimebackend.PreparedArtifactsRequest,
+) (bool, error) {
+	metadata, err := decodeStubDeploymentMetadata(request.Deployment)
+	if err != nil {
+		return false, err
+	}
+	return request.Workspace.FileExists(metadata.ArtifactPath)
+}
+
+func (s *stubRuntimeBackend) Deploy(
+	_ context.Context,
+	_ runtimebackend.DeployRequest,
+) error {
+	return s.nextDeployError()
+}
+
+func (s *stubRuntimeBackend) Teardown(
+	_ context.Context,
+	_ runtimebackend.TeardownRequest,
+) error {
+	return s.nextTeardownError()
+}
+
+func (s *stubRuntimeBackend) nextPrepareError() error {
+	s.prepareCalls++
+	if len(s.prepareErrors) == 0 {
+		return nil
+	}
+
+	err := s.prepareErrors[0]
+	s.prepareErrors = s.prepareErrors[1:]
+	return err
+}
+
+func (s *stubRuntimeBackend) nextDeployError() error {
+	s.deployCalls++
+	if len(s.deployErrors) == 0 {
+		return nil
+	}
+
+	err := s.deployErrors[0]
+	s.deployErrors = s.deployErrors[1:]
+	return err
+}
+
+func (s *stubRuntimeBackend) nextTeardownError() error {
+	s.teardownCalls++
+	if len(s.teardownErrors) == 0 {
+		return nil
+	}
+
+	err := s.teardownErrors[0]
+	s.teardownErrors = s.teardownErrors[1:]
+	return err
+}
+
+func decodeStubDeploymentMetadata(
+	deployment runtimebackend.DeploymentRecord,
+) (stubDeploymentMetadata, error) {
+	var metadata stubDeploymentMetadata
+	if err := json.Unmarshal(deployment.MetadataJSON, &metadata); err != nil {
+		return stubDeploymentMetadata{}, err
+	}
+	return metadata, nil
 }

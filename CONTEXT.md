@@ -48,6 +48,10 @@ _Avoid_: Generic matcher, hook, command, automation
 A global built-in classification of supported GitHub webhook events that Toolshed uses to route, validate, and normalize incoming webhook payloads.
 _Avoid_: Trigger Type, webhook delivery, generic event
 
+**Repository Event Family**:
+A repository-specific enablement of one built-in **Event Family** that determines whether Toolshed considers that webhook family for that repository.
+_Avoid_: Event subscription, webhook switch, trigger group
+
 **Trigger Type**:
 A global built-in trigger preset that fixes one event-matching rule and the **Operation Type** created when it matches.
 _Avoid_: Generic matcher, event family, trigger instance
@@ -103,6 +107,9 @@ _Avoid_: Server config, app config
 - A **Repository** can have many **Pull Requests**
 - A **Pull Request** has one current **Pull Request Head Commit**
 - A **Pull Request** references one current **Pull Request Source Repository**
+- A **Repository** can define multiple **Repository Event Families**
+- A **Repository Event Family** belongs to exactly one **Repository**
+- A **Repository Event Family** belongs to exactly one **Event Family**
 - A **Repository** can define multiple **Triggers**
 - A **Trigger** belongs to exactly one **Trigger Type**
 - A **Repository** can have at most one **Trigger** of a given **Trigger Type**
@@ -136,6 +143,9 @@ _Avoid_: Server config, app config
 
 > **Dev:** "If I change a repository's trigger, do I need to restart the server?"
 > **Domain expert:** "No — that's **Repository Configuration**, so it should affect later preview actions without changing the install-time **Server Configuration**."
+
+> **Dev:** "What's the difference between turning off pull-request comments for one repository and turning off one comment trigger?"
+> **Domain expert:** "The first is a **Repository Event Family** choice about one webhook family; the second is a **Trigger** choice about one built-in preset inside that family."
 
 > **Dev:** "The tarball was downloaded but the preview is not running yet. Do we already have a record for it?"
 > **Domain expert:** "Yes — the **Runtime Environment** already exists, and its **Runtime Environment Status** tells you whether it is `preparing`, `prepared`, or `failed`."
@@ -180,6 +190,10 @@ _Avoid_: Server config, app config
 - It was unclear whether **Trigger Type** names should follow technical event families or business intent. Resolved: **Trigger Type** names follow business intent and outcome, such as `preview_on_label_preview`, rather than generic event families such as `pull_request_label`.
 - It was unclear whether supported GitHub webhook classifications should be implicit string switches or an explicit model. Resolved: **Event Family** is an explicit built-in model, and each **Trigger Type** maps to exactly one **Event Family**.
 - It was unclear whether **Event Family** only labels technical routing or also owns payload parsing. Resolved: **Event Family** owns both supported-event routing and normalization of webhook payloads into the shared trigger-input model.
+- "supported events for a repository" was being used to mean both repository-level webhook-family enablement and repository-specific preset enablement. Resolved: repository-level webhook-family enablement is a **Repository Event Family**, while repository-level preset enablement remains a **Trigger**.
+- It was unclear whether disabling a **Repository Event Family** should also rewrite child **Triggers**. Resolved: disabling a **Repository Event Family** leaves child **Triggers** unchanged but makes them inert until that **Repository Event Family** is enabled again.
+- It was unclear whether **Repository Event Families** should be opt-in or created enabled by default. Resolved: when a **Repository** is registered, all supported **Repository Event Families** are created enabled by default so current webhook behavior stays live until the Operator narrows it.
+- It was unclear whether a **Trigger** may be configured while its parent **Repository Event Family** is disabled. Resolved: a **Trigger** may still be created or enabled while its parent **Repository Event Family** is disabled, but it remains inert until that family is enabled again.
 - It was unclear whether **Operation Type** should remain implicit in scattered switch statements. Resolved: **Operation Type** is an explicit built-in model with its own code-level definition, so execution behavior is extended through the registry rather than through scattered switches.
 - It was unclear whether built-in automation rules should stay split across multiple packages or multiple peer registries. Resolved: built-in automation definitions live in one central **Event Family** registry that acts as the single source of truth, with **Trigger Type** and **Operation Type** mappings hanging from those event definitions rather than from separate top-level registries.
 - It was unclear whether **Operation Type** belongs to repository configuration. Resolved: **Operation Type** is a global built-in system category, while repositories only choose which **Triggers** are enabled.

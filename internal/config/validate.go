@@ -23,6 +23,18 @@ func (c *Config) Validate() error {
 	if c.Jobs.OperationRequestTimeout <= 0 {
 		errs = append(errs, "jobs.operation_request_timeout must be greater than 0")
 	}
+	if strings.TrimSpace(c.Runtime.IngressNetwork) == "" {
+		errs = append(errs, "runtime.ingress_network is required")
+	}
+	if c.Runtime.DockerCompose.DefaultServiceCPUs <= 0 {
+		errs = append(errs, "runtime.docker_compose.default_service_cpus must be greater than 0")
+	}
+	if strings.TrimSpace(c.Runtime.DockerCompose.DefaultServiceMemory) == "" {
+		errs = append(errs, "runtime.docker_compose.default_service_memory is required")
+	}
+	if c.Runtime.DockerCompose.DefaultServicePIDs <= 0 {
+		errs = append(errs, "runtime.docker_compose.default_service_pids must be greater than 0")
+	}
 	if c.DB.DSN == "" {
 		errs = append(errs, "db.dsn is required (or set TOOLSHED_DB_DSN)")
 	}

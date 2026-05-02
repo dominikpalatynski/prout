@@ -18,6 +18,7 @@ type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Storage  StorageConfig  `yaml:"storage"`
 	Jobs     JobsConfig     `yaml:"jobs"`
+	Runtime  RuntimeConfig  `yaml:"runtime"`
 	DB       DBConfig       `yaml:"db"`
 	Log      LogConfig      `yaml:"log"`
 	GitHub   GitHubConfig   `yaml:"github"`
@@ -39,6 +40,17 @@ type FilesystemStorageConfig struct {
 
 type JobsConfig struct {
 	OperationRequestTimeout time.Duration `yaml:"operation_request_timeout" env:"TOOLSHED_JOBS_OPERATION_REQUEST_TIMEOUT"`
+}
+
+type RuntimeConfig struct {
+	IngressNetwork string                     `yaml:"ingress_network" env:"TOOLSHED_RUNTIME_INGRESS_NETWORK"`
+	DockerCompose  DockerComposeRuntimeConfig `yaml:"docker_compose"`
+}
+
+type DockerComposeRuntimeConfig struct {
+	DefaultServiceCPUs   float64 `yaml:"default_service_cpus" env:"TOOLSHED_RUNTIME_DOCKER_COMPOSE_DEFAULT_SERVICE_CPUS"`
+	DefaultServiceMemory string  `yaml:"default_service_memory" env:"TOOLSHED_RUNTIME_DOCKER_COMPOSE_DEFAULT_SERVICE_MEMORY"`
+	DefaultServicePIDs   int     `yaml:"default_service_pids" env:"TOOLSHED_RUNTIME_DOCKER_COMPOSE_DEFAULT_SERVICE_PIDS"`
 }
 
 type DBConfig struct {

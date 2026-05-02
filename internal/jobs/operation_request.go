@@ -15,6 +15,7 @@ import (
 	"github.com/dominikpalatynski/toolshed/internal/githubapp"
 	applog "github.com/dominikpalatynski/toolshed/internal/log"
 	"github.com/dominikpalatynski/toolshed/internal/operations"
+	runtimebackend "github.com/dominikpalatynski/toolshed/internal/runtime"
 	"github.com/dominikpalatynski/toolshed/internal/store"
 	"github.com/dominikpalatynski/toolshed/internal/store/sqlc"
 )
@@ -33,6 +34,7 @@ type OperationRequestWorker struct {
 
 	githubDownloader githubapp.TarballDownloader
 	workspaceManager workspaceManager
+	runtimeBackend   runtimebackend.Backend
 	jobEnqueuer      operationRequestEnqueuer
 	jobTimeout       time.Duration
 }
@@ -54,6 +56,7 @@ func NewWorkers(
 	logger *slog.Logger,
 	githubDownloader githubapp.TarballDownloader,
 	workspaceManager workspaceManager,
+	runtimeBackend runtimebackend.Backend,
 ) (*river.Workers, *OperationRequestWorker) {
 	workers := river.NewWorkers()
 	worker := &OperationRequestWorker{
@@ -61,6 +64,7 @@ func NewWorkers(
 		store:            appStore,
 		githubDownloader: githubDownloader,
 		workspaceManager: workspaceManager,
+		runtimeBackend:   runtimeBackend,
 	}
 	river.AddWorker(workers, worker)
 	return workers, worker
@@ -100,6 +104,13 @@ func (w *OperationRequestWorker) Work(ctx context.Context, job *river.Job[Operat
 	}
 
 	if err := w.handleOperationRequest(ctx, operationRequest); err != nil {
+		if runtimebackend.IsPermanentError(err) {
+			if updateErr := w.finalizeOperationRequestFailure(ctx, operationRequest.ID, err); updateErr != nil {
+				return errors.Join(fmt.Errorf("handle operation request: %w", err), fmt.Errorf("mark permanent operation request failure: %w", updateErr))
+			}
+			return nil
+		}
+
 		if job.JobRow.Attempt >= job.JobRow.MaxAttempts {
 			if updateErr := w.finalizeOperationRequestFailure(ctx, operationRequest.ID, err); updateErr != nil {
 				return errors.Join(fmt.Errorf("handle operation request: %w", err), fmt.Errorf("mark operation request failed: %w", updateErr))

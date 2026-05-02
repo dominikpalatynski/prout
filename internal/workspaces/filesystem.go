@@ -9,14 +9,41 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	runtimebackend "github.com/dominikpalatynski/toolshed/internal/runtime"
 )
 
 type FilesystemManager struct {
 	root string
 }
 
+type FilesystemWorkspace struct {
+	locator string
+	path    string
+}
+
 func NewFilesystemManager(root string) *FilesystemManager {
 	return &FilesystemManager{root: root}
+}
+
+func (m *FilesystemManager) OpenWorkspace(locator string) (runtimebackend.Workspace, error) {
+	workspacePath, err := m.workspacePath(locator)
+	if err != nil {
+		return nil, err
+	}
+
+	info, err := os.Stat(workspacePath)
+	if err != nil {
+		return nil, fmt.Errorf("stat workspace: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("workspace %q is not a directory", locator)
+	}
+
+	return &FilesystemWorkspace{
+		locator: locator,
+		path:    workspacePath,
+	}, nil
 }
 
 func (m *FilesystemManager) WorkspaceExists(locator string) (bool, error) {
@@ -165,6 +192,89 @@ func (m *FilesystemManager) CleanupWorkspace(locator string) error {
 
 func (m *FilesystemManager) workspacePath(locator string) (string, error) {
 	return secureJoin(m.root, locator)
+}
+
+func (w *FilesystemWorkspace) Locator() string {
+	return w.locator
+}
+
+func (w *FilesystemWorkspace) Path() string {
+	return w.path
+}
+
+func (w *FilesystemWorkspace) ResolvePath(relativePath string) (string, error) {
+	return secureJoin(w.path, relativePath)
+}
+
+func (w *FilesystemWorkspace) FileExists(relativePath string) (bool, error) {
+	resolvedPath, err := w.ResolvePath(relativePath)
+	if err != nil {
+		return false, err
+	}
+
+	info, err := os.Stat(resolvedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat workspace file: %w", err)
+	}
+
+	return !info.IsDir(), nil
+}
+
+func (w *FilesystemWorkspace) ReadFile(relativePath string) ([]byte, error) {
+	resolvedPath, err := w.ResolvePath(relativePath)
+	if err != nil {
+		return nil, err
+	}
+
+	contents, err := os.ReadFile(resolvedPath)
+	if err != nil {
+		return nil, fmt.Errorf("read workspace file %q: %w", relativePath, err)
+	}
+
+	return contents, nil
+}
+
+func (w *FilesystemWorkspace) WriteFile(relativePath string, contents []byte, mode os.FileMode) error {
+	resolvedPath, err := w.ResolvePath(relativePath)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(resolvedPath), 0o755); err != nil {
+		return fmt.Errorf("create workspace parent for %q: %w", relativePath, err)
+	}
+
+	if err := os.WriteFile(resolvedPath, contents, mode); err != nil {
+		return fmt.Errorf("write workspace file %q: %w", relativePath, err)
+	}
+
+	return nil
+}
+
+func (w *FilesystemWorkspace) WriteFileAdjacentTo(
+	relativePath string,
+	siblingName string,
+	contents []byte,
+	mode os.FileMode,
+) (string, error) {
+	targetPath := adjacentWorkspacePath(relativePath, siblingName)
+	if err := w.WriteFile(targetPath, contents, mode); err != nil {
+		return "", err
+	}
+
+	return targetPath, nil
+}
+
+func adjacentWorkspacePath(relativePath string, siblingName string) string {
+	parent := path.Dir(path.Clean(relativePath))
+	if parent == "." {
+		return siblingName
+	}
+
+	return path.Join(parent, siblingName)
 }
 
 func stripTarballWrapper(name string) (string, bool, error) {

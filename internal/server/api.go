@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -75,7 +76,7 @@ func (s *Server) registerRepository(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"repository": repositoryResponseFromModel(record),
+		"repository": repositoryResponseFromModel(store.RepositoryFromUpsertRow(record)),
 	})
 }
 
@@ -195,6 +196,166 @@ func (s *Server) patchRepository(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"repository": repositoryResponseFromModel(record),
+	})
+}
+
+func (s *Server) getRepositoryRuntimeSettings(w http.ResponseWriter, r *http.Request) {
+	repositoryID, err := pathInt64(r, "repositoryID")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	ctx := applog.WithRepoID(r.Context(), repositoryID)
+
+	if _, err := s.requireRepository(ctx, repositoryID); err != nil {
+		s.writeRepositoryLookupError(w, ctx, repositoryID, err)
+		return
+	}
+
+	record, err := s.loadOrCreateRepositoryRuntimeSettings(ctx, repositoryID)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "load repository runtime settings failed", "error", err, "repository_id", repositoryID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "failed to load repository runtime settings",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runtime_settings": repositoryRuntimeSettingsResponseFromModel(record),
+	})
+}
+
+func (s *Server) putRepositoryRuntimeSettings(w http.ResponseWriter, r *http.Request) {
+	repositoryID, err := pathInt64(r, "repositoryID")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	ctx := applog.WithRepoID(r.Context(), repositoryID)
+
+	if _, err := s.requireRepository(ctx, repositoryID); err != nil {
+		s.writeRepositoryLookupError(w, ctx, repositoryID, err)
+		return
+	}
+
+	var request struct {
+		ComposeFilePath    string `json:"compose_file_path"`
+		ExposedServiceName string `json:"exposed_service_name"`
+		ExposedServicePort int32  `json:"exposed_service_port"`
+	}
+	if err := decodeJSONBody(w, r, &request); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+	if request.ExposedServicePort < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "exposed_service_port must be greater than or equal to 0",
+		})
+		return
+	}
+
+	record, err := s.store.Q().UpsertRepositoryRuntimeSettings(ctx, sqlc.UpsertRepositoryRuntimeSettingsParams{
+		RepositoryID:       repositoryID,
+		ComposeFilePath:    optionalTrimmedString(request.ComposeFilePath),
+		ExposedServiceName: optionalTrimmedString(request.ExposedServiceName),
+		ExposedServicePort: optionalInt32(request.ExposedServicePort),
+	})
+	if err != nil {
+		s.logger.ErrorContext(ctx, "upsert repository runtime settings failed", "error", err, "repository_id", repositoryID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "failed to update repository runtime settings",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runtime_settings": repositoryRuntimeSettingsResponseFromModel(record),
+	})
+}
+
+func (s *Server) listRepositoryEnvironmentVariables(w http.ResponseWriter, r *http.Request) {
+	repositoryID, err := pathInt64(r, "repositoryID")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	ctx := applog.WithRepoID(r.Context(), repositoryID)
+
+	if _, err := s.requireRepository(ctx, repositoryID); err != nil {
+		s.writeRepositoryLookupError(w, ctx, repositoryID, err)
+		return
+	}
+
+	records, err := s.store.Q().ListRepositoryEnvironmentVariablesByRepositoryID(ctx, repositoryID)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "list repository environment variables failed", "error", err, "repository_id", repositoryID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "failed to list repository environment variables",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"environment_variables": repositoryEnvironmentVariableResponsesFromModels(records),
+	})
+}
+
+func (s *Server) putRepositoryEnvironmentVariables(w http.ResponseWriter, r *http.Request) {
+	repositoryID, err := pathInt64(r, "repositoryID")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	ctx := applog.WithRepoID(r.Context(), repositoryID)
+
+	if _, err := s.requireRepository(ctx, repositoryID); err != nil {
+		s.writeRepositoryLookupError(w, ctx, repositoryID, err)
+		return
+	}
+
+	var request struct {
+		EnvironmentVariables []repositoryEnvironmentVariableRequest `json:"environment_variables"`
+	}
+	if err := decodeJSONBody(w, r, &request); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	inputs := make([]store.RepositoryEnvironmentVariableInput, 0, len(request.EnvironmentVariables))
+	for _, variable := range request.EnvironmentVariables {
+		inputs = append(inputs, store.RepositoryEnvironmentVariableInput{
+			Name:  variable.Name,
+			Value: variable.Value,
+		})
+	}
+
+	records, err := s.store.ReplaceRepositoryEnvironmentVariables(ctx, repositoryID, inputs)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"environment_variables": repositoryEnvironmentVariableResponsesFromModels(records),
 	})
 }
 
@@ -510,6 +671,26 @@ type repositoryResponse struct {
 	UpdatedAt            time.Time `json:"updated_at"`
 }
 
+type repositoryRuntimeSettingsResponse struct {
+	RepositoryID       int64     `json:"repository_id"`
+	ComposeFilePath    *string   `json:"compose_file_path,omitempty"`
+	ExposedServiceName *string   `json:"exposed_service_name,omitempty"`
+	ExposedServicePort *int32    `json:"exposed_service_port,omitempty"`
+	Complete           bool      `json:"complete"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+type repositoryEnvironmentVariableRequest struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+type repositoryEnvironmentVariableResponse struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
 type triggerResponse struct {
 	ID           int64           `json:"id"`
 	RepositoryID int64           `json:"repository_id"`
@@ -620,6 +801,33 @@ func repositoryResponseFromModel(record sqlc.Repositories) repositoryResponse {
 		CreatedAt:            mustTime(record.CreatedAt),
 		UpdatedAt:            mustTime(record.UpdatedAt),
 	}
+}
+
+func repositoryRuntimeSettingsResponseFromModel(
+	record sqlc.RepositoryRuntimeSettings,
+) repositoryRuntimeSettingsResponse {
+	return repositoryRuntimeSettingsResponse{
+		RepositoryID:       record.RepositoryID,
+		ComposeFilePath:    record.ComposeFilePath,
+		ExposedServiceName: record.ExposedServiceName,
+		ExposedServicePort: record.ExposedServicePort,
+		Complete:           repositoryRuntimeSettingsComplete(record),
+		CreatedAt:          mustTime(record.CreatedAt),
+		UpdatedAt:          mustTime(record.UpdatedAt),
+	}
+}
+
+func repositoryEnvironmentVariableResponsesFromModels(
+	records []sqlc.RepositoryEnvironmentVariables,
+) []repositoryEnvironmentVariableResponse {
+	response := make([]repositoryEnvironmentVariableResponse, 0, len(records))
+	for _, record := range records {
+		response = append(response, repositoryEnvironmentVariableResponse{
+			Name:  record.Name,
+			Value: record.Value,
+		})
+	}
+	return response
 }
 
 func triggerResponseFromModel(record sqlc.RepositoryTriggers) triggerResponse {
@@ -835,6 +1043,74 @@ func isAllowed(value string, allowed ...string) bool {
 		}
 	}
 	return false
+}
+
+func (s *Server) requireRepository(ctx context.Context, repositoryID int64) (sqlc.Repositories, error) {
+	return s.store.Q().GetRepositoryByID(ctx, repositoryID)
+}
+
+func (s *Server) writeRepositoryLookupError(
+	w http.ResponseWriter,
+	ctx context.Context,
+	repositoryID int64,
+	err error,
+) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "repository not found",
+		})
+		return
+	}
+
+	s.logger.ErrorContext(ctx, "get repository failed", "error", err, "repository_id", repositoryID)
+	writeJSON(w, http.StatusInternalServerError, map[string]string{
+		"error": "failed to load repository",
+	})
+}
+
+func (s *Server) loadOrCreateRepositoryRuntimeSettings(
+	ctx context.Context,
+	repositoryID int64,
+) (sqlc.RepositoryRuntimeSettings, error) {
+	record, err := s.store.Q().GetRepositoryRuntimeSettingsByRepositoryID(ctx, repositoryID)
+	if err == nil {
+		return record, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return sqlc.RepositoryRuntimeSettings{}, err
+	}
+
+	return s.store.Q().UpsertRepositoryRuntimeSettings(ctx, sqlc.UpsertRepositoryRuntimeSettingsParams{
+		RepositoryID: repositoryID,
+	})
+}
+
+func repositoryRuntimeSettingsComplete(record sqlc.RepositoryRuntimeSettings) bool {
+	return strings.TrimSpace(stringPtrValue(record.ComposeFilePath)) != "" &&
+		strings.TrimSpace(stringPtrValue(record.ExposedServiceName)) != "" &&
+		int32PtrValue(record.ExposedServicePort) > 0
+}
+
+func optionalTrimmedString(value string) *string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func optionalInt32(value int32) *int32 {
+	if value == 0 {
+		return nil
+	}
+	return &value
+}
+
+func int32PtrValue(value *int32) int32 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func mustTime(ts pgtype.Timestamptz) time.Time {

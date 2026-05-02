@@ -21,6 +21,8 @@ Smoke checks:
 - `curl http://localhost:8080/readyz`
 - `curl -H 'Authorization: Bearer replace-me' http://localhost:8080/api/trigger-types`
 - `curl -X POST http://localhost:8080/api/repositories -H 'Authorization: Bearer replace-me' -H 'Content-Type: application/json' -d '{"full_name":"owner/repo"}'`
+- `curl -X PUT http://localhost:8080/api/repositories/1/runtime-settings -H 'Authorization: Bearer replace-me' -H 'Content-Type: application/json' -d '{"compose_file_path":"compose.yml","exposed_service_name":"app","exposed_service_port":8080}'`
+- `curl -X PUT http://localhost:8080/api/repositories/1/environment-variables -H 'Authorization: Bearer replace-me' -H 'Content-Type: application/json' -d '{"environment_variables":[{"name":"APP_ENV","value":"preview"}]}'`
 - `curl -X POST http://localhost:8080/api/repositories/1/triggers -H 'Authorization: Bearer replace-me' -H 'Content-Type: application/json' -d '{"type":"pull_request_opened","config":{}}'`
 - `payload='{"action":"opened","number":42,"repository":{"id":123456},"pull_request":{"head":{"sha":"abc123"}}}'`
 - `sig=$(printf '%s' "$payload" | openssl dgst -sha256 -hmac 'replace-me' -binary | xxd -p -c 256)`

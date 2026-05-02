@@ -1,23 +1,71 @@
-// Package runtime defines the escape-hatch interface that decouples Toolshed's
-// preview-env orchestration from the underlying compute backend (docker compose,
-// k8s, etc.). See ADR-005.
+// Package runtime defines the orchestration-facing contract for preview
+// backends such as Docker Compose. The worker owns repository config, durable
+// state, and step progression; the backend owns preparation, deployment, and
+// teardown for one frozen deployment input.
 package runtime
 
-import "context"
+import (
+	"context"
+	"os"
+)
 
-// DeployParams carries everything a runtime needs to spin up a preview env for
-// a single PR. Concrete fields will grow as the preview package evolves.
-type DeployParams struct {
-	RepositoryID int64
-	PRNumber     int
-	SHA          string
-	WorkspaceDir string
-	EnvVars      map[string]string
+type Workspace interface {
+	Locator() string
+	Path() string
+	ResolvePath(relativePath string) (string, error)
+	FileExists(relativePath string) (bool, error)
+	ReadFile(relativePath string) ([]byte, error)
+	WriteFile(relativePath string, contents []byte, mode os.FileMode) error
+	WriteFileAdjacentTo(relativePath string, siblingName string, contents []byte, mode os.FileMode) (string, error)
 }
 
-// Runtime is the contract every backend implementation must satisfy.
-// Default implementation lives under internal/runtime/dockercompose.
-type Runtime interface {
-	Deploy(ctx context.Context, p DeployParams) error
-	Teardown(ctx context.Context, prID int) error
+type RuntimeSettings struct {
+	ComposeFilePath    string
+	ExposedServiceName string
+	ExposedServicePort int32
+}
+
+type EnvironmentVariable struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+type PrepareRequest struct {
+	RuntimeEnvironmentID int64
+	RepositoryID         int64
+	PullRequestID        int64
+	TargetCommitSHA      string
+	Workspace            Workspace
+	RuntimeSettings      RuntimeSettings
+	EnvironmentVariables []EnvironmentVariable
+}
+
+type DeploymentRecord struct {
+	Backend                        string
+	FrozenRuntimeSettingsJSON      []byte
+	FrozenEnvironmentVariablesJSON []byte
+	MetadataJSON                   []byte
+}
+
+type PreparedArtifactsRequest struct {
+	Workspace  Workspace
+	Deployment DeploymentRecord
+}
+
+type DeployRequest struct {
+	Workspace  Workspace
+	Deployment DeploymentRecord
+}
+
+type TeardownRequest struct {
+	Workspace  Workspace
+	Deployment DeploymentRecord
+}
+
+type Backend interface {
+	Name() string
+	Prepare(ctx context.Context, request PrepareRequest) (DeploymentRecord, error)
+	PreparedArtifactsExist(ctx context.Context, request PreparedArtifactsRequest) (bool, error)
+	Deploy(ctx context.Context, request DeployRequest) error
+	Teardown(ctx context.Context, request TeardownRequest) error
 }

@@ -14,7 +14,7 @@ func TestListRuntimeEnvironmentsFiltersAndOrdersNewestFirst(t *testing.T) {
 	appStore := New(pool)
 	ctx := context.Background()
 
-	repository, err := appStore.Q().UpsertRepository(ctx, sqlc.UpsertRepositoryParams{
+	repositoryRow, err := appStore.Q().UpsertRepository(ctx, sqlc.UpsertRepositoryParams{
 		GithubRepositoryID:   1001,
 		GithubInstallationID: 2001,
 		Owner:                "acme",
@@ -26,6 +26,7 @@ func TestListRuntimeEnvironmentsFiltersAndOrdersNewestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertRepository() error = %v", err)
 	}
+	repository := RepositoryFromUpsertRow(repositoryRow)
 
 	firstPullRequest := mustCreatePullRequest(t, ctx, appStore, repository, 41, "aaa111")
 	secondPullRequest := mustCreatePullRequest(t, ctx, appStore, repository, 42, "bbb222")

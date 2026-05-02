@@ -10,6 +10,13 @@ storage:
 jobs:
   operation_request_timeout: 10m
 
+runtime:
+  ingress_network: toolshed-traefik
+  docker_compose:
+    default_service_cpus: 1
+    default_service_memory: 512m
+    default_service_pids: 256
+
 db:
   dsn: "postgres://toolshed:toolshed@localhost:5433/toolshed?sslmode=disable"
 

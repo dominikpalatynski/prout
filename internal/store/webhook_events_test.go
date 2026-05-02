@@ -14,7 +14,7 @@ func TestGetWebhookEventDetailHydratesOperationRequestsWithRuntimeEnvironment(t 
 	appStore := New(pool)
 	ctx := context.Background()
 
-	repository, err := appStore.Q().UpsertRepository(ctx, sqlc.UpsertRepositoryParams{
+	repositoryRow, err := appStore.Q().UpsertRepository(ctx, sqlc.UpsertRepositoryParams{
 		GithubRepositoryID:   501,
 		GithubInstallationID: 601,
 		Owner:                "acme",
@@ -26,6 +26,7 @@ func TestGetWebhookEventDetailHydratesOperationRequestsWithRuntimeEnvironment(t 
 	if err != nil {
 		t.Fatalf("UpsertRepository() error = %v", err)
 	}
+	repository := RepositoryFromUpsertRow(repositoryRow)
 
 	webhookEvent, err := appStore.Q().InsertWebhookEvent(ctx, sqlc.InsertWebhookEventParams{
 		DeliveryID:         "delivery-1",

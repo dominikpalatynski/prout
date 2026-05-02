@@ -19,6 +19,7 @@ import (
 	"github.com/dominikpalatynski/toolshed/internal/githubapp"
 	"github.com/dominikpalatynski/toolshed/internal/jobs"
 	applog "github.com/dominikpalatynski/toolshed/internal/log"
+	"github.com/dominikpalatynski/toolshed/internal/runtime/dockercompose"
 	"github.com/dominikpalatynski/toolshed/internal/store"
 	"github.com/dominikpalatynski/toolshed/internal/triggers"
 	"github.com/dominikpalatynski/toolshed/internal/workspaces"
@@ -58,7 +59,13 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	workspaceManager := workspaces.NewFilesystemManager(cfg.Storage.Filesystem.WorkspaceRoot)
-	workers, operationRequestWorker := jobs.NewWorkers(pingStore, logger, githubClient, workspaceManager)
+	runtimeBackend := dockercompose.NewBackend(dockercompose.Config{
+		IngressNetwork:       cfg.Runtime.IngressNetwork,
+		DefaultServiceCPUs:   cfg.Runtime.DockerCompose.DefaultServiceCPUs,
+		DefaultServiceMemory: cfg.Runtime.DockerCompose.DefaultServiceMemory,
+		DefaultServicePIDs:   cfg.Runtime.DockerCompose.DefaultServicePIDs,
+	})
+	workers, operationRequestWorker := jobs.NewWorkers(pingStore, logger, githubClient, workspaceManager, runtimeBackend)
 	operationRequestWorker.SetJobTimeout(cfg.Jobs.OperationRequestTimeout)
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger: logger,

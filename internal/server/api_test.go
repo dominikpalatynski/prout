@@ -141,6 +141,39 @@ func TestPullRequestSummaryResponseIncludesCurrentSourceRepository(t *testing.T)
 	}
 }
 
+func TestRepositoryRuntimeSettingsResponseIncludesCompletenessFlag(t *testing.T) {
+	t.Parallel()
+
+	response := repositoryRuntimeSettingsResponseFromModel(sqlc.RepositoryRuntimeSettings{
+		RepositoryID:       7,
+		ComposeFilePath:    strPtr("compose.yml"),
+		ExposedServiceName: strPtr("app"),
+		ExposedServicePort: int32Ptr(8080),
+		CreatedAt:          validTimestamp(),
+		UpdatedAt:          validTimestamp(),
+	})
+
+	if !response.Complete {
+		t.Fatalf("Complete = false, want true")
+	}
+}
+
+func TestRepositoryEnvironmentVariableResponsesPreserveSortedOrder(t *testing.T) {
+	t.Parallel()
+
+	response := repositoryEnvironmentVariableResponsesFromModels([]sqlc.RepositoryEnvironmentVariables{
+		{Name: "ALPHA", Value: "1"},
+		{Name: "BETA", Value: "2"},
+	})
+
+	if len(response) != 2 {
+		t.Fatalf("len(response) = %d, want 2", len(response))
+	}
+	if response[0].Name != "ALPHA" || response[1].Name != "BETA" {
+		t.Fatalf("response order = [%q %q], want [ALPHA BETA]", response[0].Name, response[1].Name)
+	}
+}
+
 func validTimestamp() pgtype.Timestamptz {
 	return pgtype.Timestamptz{
 		Time:  time.Date(2026, time.May, 1, 13, 31, 0, 0, time.UTC),
@@ -153,6 +186,10 @@ func int64Ptr(value int64) *int64 {
 }
 
 func strPtr(value string) *string {
+	return &value
+}
+
+func int32Ptr(value int32) *int32 {
 	return &value
 }
 

@@ -4,6 +4,9 @@ import "fmt"
 
 const (
 	StepSourceMaterialization = "source_materialization"
+	StepComposePreparation    = "compose_preparation"
+	StepRuntimeDeployment     = "runtime_deployment"
+	StepRuntimeTeardown       = "runtime_teardown"
 	StepWorkspaceCleanup      = "workspace_cleanup"
 
 	StepStatePending    = "pending"
@@ -50,9 +53,81 @@ var stepMachines = map[string]stepMachine{
 			from: StepStatus{Name: StepSourceMaterialization, State: StepStateInProgress},
 			to:   StepStatus{Name: StepSourceMaterialization, State: StepStateFailed},
 		},
+		stepTransition{
+			from: StepStatus{Name: StepSourceMaterialization, State: StepStateCompleted},
+			to:   StepStatus{Name: StepComposePreparation, State: StepStatePending},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepComposePreparation, State: StepStatePending},
+			to:   StepStatus{Name: StepComposePreparation, State: StepStateInProgress},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepComposePreparation, State: StepStatePending},
+			to:   StepStatus{Name: StepComposePreparation, State: StepStateCompleted},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepComposePreparation, State: StepStatePending},
+			to:   StepStatus{Name: StepComposePreparation, State: StepStateFailed},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepComposePreparation, State: StepStateInProgress},
+			to:   StepStatus{Name: StepComposePreparation, State: StepStateCompleted},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepComposePreparation, State: StepStateInProgress},
+			to:   StepStatus{Name: StepComposePreparation, State: StepStateFailed},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepComposePreparation, State: StepStateCompleted},
+			to:   StepStatus{Name: StepRuntimeDeployment, State: StepStatePending},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepRuntimeDeployment, State: StepStatePending},
+			to:   StepStatus{Name: StepRuntimeDeployment, State: StepStateInProgress},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepRuntimeDeployment, State: StepStatePending},
+			to:   StepStatus{Name: StepRuntimeDeployment, State: StepStateCompleted},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepRuntimeDeployment, State: StepStatePending},
+			to:   StepStatus{Name: StepRuntimeDeployment, State: StepStateFailed},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepRuntimeDeployment, State: StepStateInProgress},
+			to:   StepStatus{Name: StepRuntimeDeployment, State: StepStateCompleted},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepRuntimeDeployment, State: StepStateInProgress},
+			to:   StepStatus{Name: StepRuntimeDeployment, State: StepStateFailed},
+		},
 	),
 	TypePreviewCleanupSuperseded: newStepMachine(
-		StepStatus{Name: StepWorkspaceCleanup, State: StepStatePending},
+		StepStatus{Name: StepRuntimeTeardown, State: StepStatePending},
+		stepTransition{
+			from: StepStatus{Name: StepRuntimeTeardown, State: StepStatePending},
+			to:   StepStatus{Name: StepRuntimeTeardown, State: StepStateInProgress},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepRuntimeTeardown, State: StepStatePending},
+			to:   StepStatus{Name: StepRuntimeTeardown, State: StepStateCompleted},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepRuntimeTeardown, State: StepStatePending},
+			to:   StepStatus{Name: StepRuntimeTeardown, State: StepStateFailed},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepRuntimeTeardown, State: StepStateInProgress},
+			to:   StepStatus{Name: StepRuntimeTeardown, State: StepStateCompleted},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepRuntimeTeardown, State: StepStateInProgress},
+			to:   StepStatus{Name: StepRuntimeTeardown, State: StepStateFailed},
+		},
+		stepTransition{
+			from: StepStatus{Name: StepRuntimeTeardown, State: StepStateCompleted},
+			to:   StepStatus{Name: StepWorkspaceCleanup, State: StepStatePending},
+		},
 		stepTransition{
 			from: StepStatus{Name: StepWorkspaceCleanup, State: StepStatePending},
 			to:   StepStatus{Name: StepWorkspaceCleanup, State: StepStateInProgress},

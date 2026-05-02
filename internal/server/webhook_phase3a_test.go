@@ -189,7 +189,7 @@ func newTestRiverClient(t *testing.T, pool *pgxpool.Pool, appStore *store.Store,
 			river.QueueDefault: {MaxWorkers: 1},
 		},
 		Workers: func() *river.Workers {
-			workers, _ := jobs.NewWorkers(appStore, logger, nil, nil)
+			workers, _ := jobs.NewWorkers(appStore, logger, nil, nil, nil)
 			return workers
 		}(),
 	})
@@ -202,7 +202,7 @@ func newTestRiverClient(t *testing.T, pool *pgxpool.Pool, appStore *store.Store,
 func mustCreateEnabledRepository(t *testing.T, ctx context.Context, appStore *store.Store) sqlc.Repositories {
 	t.Helper()
 
-	repository, err := appStore.Q().UpsertRepository(ctx, sqlc.UpsertRepositoryParams{
+	repositoryRow, err := appStore.Q().UpsertRepository(ctx, sqlc.UpsertRepositoryParams{
 		GithubRepositoryID:   101,
 		GithubInstallationID: 202,
 		Owner:                "acme",
@@ -214,6 +214,7 @@ func mustCreateEnabledRepository(t *testing.T, ctx context.Context, appStore *st
 	if err != nil {
 		t.Fatalf("UpsertRepository() error = %v", err)
 	}
+	repository := store.RepositoryFromUpsertRow(repositoryRow)
 
 	repository, err = appStore.Q().SetRepositoryEnabled(ctx, sqlc.SetRepositoryEnabledParams{
 		ID:      repository.ID,
