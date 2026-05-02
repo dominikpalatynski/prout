@@ -19,13 +19,17 @@ const (
 	CommentMatcherExactFirstLine = "exact_first_line"
 )
 
-type Catalog struct{}
+type Catalog struct {
+	definitions map[string]definition
+	order       []string
+}
 
 type TypeDefinition struct {
-	Type         string        `json:"type"`
-	EventFamily  string        `json:"event_family"`
-	Description  string        `json:"description"`
-	ConfigFields []ConfigField `json:"config_fields"`
+	Type         string          `json:"type"`
+	EventFamily  string          `json:"event_family"`
+	Description  string          `json:"description"`
+	Config       json.RawMessage `json:"config,omitempty"`
+	ConfigFields []ConfigField   `json:"config_fields,omitempty"`
 }
 
 type ConfigField struct {
@@ -50,121 +54,114 @@ type Evaluation struct {
 	OperationIntent     *operations.Intent
 }
 
+type definition struct {
+	TypeDefinition
+	IdentityKey     string
+	normalizeConfig func(json.RawMessage) ([]byte, error)
+	matchEvent      func(webhook.NormalizedEvent) (bool, string)
+}
+
 func NewCatalog() *Catalog {
-	return &Catalog{}
+	return &Catalog{
+		definitions: map[string]definition{
+			TypePullRequestOpened: {
+				TypeDefinition: TypeDefinition{
+					Type:        TypePullRequestOpened,
+					EventFamily: webhook.EventTypePullRequestOpened,
+					Description: "Creates a preview when a pull request is opened.",
+					Config:      mustMarshalRawMessage(struct{}{}),
+				},
+				IdentityKey:     TypePullRequestOpened,
+				normalizeConfig: normalizeEmptyConfig,
+				matchEvent: func(_ webhook.NormalizedEvent) (bool, string) {
+					return true, "pull_request_opened_matched"
+				},
+			},
+			TypePullRequestLabel: {
+				TypeDefinition: TypeDefinition{
+					Type:        TypePullRequestLabel,
+					EventFamily: webhook.EventTypePullRequestLabeled,
+					Description: "Creates a preview when the fixed preview label preset is applied.",
+					Config: mustMarshalRawMessage(pullRequestLabelConfig{
+						Label: "preview",
+					}),
+				},
+				IdentityKey:     TypePullRequestLabel + ":preview",
+				normalizeConfig: normalizePullRequestLabelConfig,
+				matchEvent: func(event webhook.NormalizedEvent) (bool, string) {
+					if strings.TrimSpace(event.Label) == "preview" {
+						return true, "label_matched"
+					}
+					return false, "label_mismatch"
+				},
+			},
+			TypePullRequestCommentCommand: {
+				TypeDefinition: TypeDefinition{
+					Type:        TypePullRequestCommentCommand,
+					EventFamily: webhook.EventTypeIssueCommentCreated,
+					Description: "Creates a preview when the fixed preview comment command preset is posted on the pull request.",
+					Config: mustMarshalRawMessage(pullRequestCommentCommandConfig{
+						Matcher: CommentMatcherExactFirstLine,
+						Command: "/preview",
+					}),
+				},
+				IdentityKey:     TypePullRequestCommentCommand + ":" + CommentMatcherExactFirstLine + ":/preview",
+				normalizeConfig: normalizePullRequestCommentCommandConfig,
+				matchEvent: func(event webhook.NormalizedEvent) (bool, string) {
+					if event.CommentFirstLine == "/preview" {
+						return true, "comment_command_matched"
+					}
+					return false, "comment_command_mismatch"
+				},
+			},
+		},
+		order: []string{
+			TypePullRequestOpened,
+			TypePullRequestLabel,
+			TypePullRequestCommentCommand,
+		},
+	}
 }
 
 func (c *Catalog) Definitions() []TypeDefinition {
-	return []TypeDefinition{
-		{
-			Type:        TypePullRequestOpened,
-			EventFamily: webhook.EventTypePullRequestOpened,
-			Description: "Matches pull_request.opened deliveries for the repository.",
-		},
-		{
-			Type:        TypePullRequestLabel,
-			EventFamily: webhook.EventTypePullRequestLabeled,
-			Description: "Matches pull_request.labeled deliveries for one exact label.",
-			ConfigFields: []ConfigField{
-				{
-					Name:        "label",
-					Type:        "string",
-					Required:    true,
-					Description: "Exact GitHub label name to match.",
-				},
-			},
-		},
-		{
-			Type:        TypePullRequestCommentCommand,
-			EventFamily: webhook.EventTypeIssueCommentCreated,
-			Description: "Matches a pull request conversation comment command using the configured comment matcher.",
-			ConfigFields: []ConfigField{
-				{
-					Name:          "matcher",
-					Type:          "string",
-					Required:      true,
-					Description:   "Comment matching strategy.",
-					AllowedValues: []string{CommentMatcherExactFirstLine},
-				},
-				{
-					Name:        "command",
-					Type:        "string",
-					Required:    true,
-					Description: "Case-sensitive command text matched against the first comment line.",
-				},
-			},
-		},
+	definitions := make([]TypeDefinition, 0, len(c.order))
+	for _, triggerType := range c.order {
+		definition := c.definitions[triggerType].TypeDefinition
+		definition.Config = append(json.RawMessage(nil), definition.Config...)
+		definitions = append(definitions, definition)
 	}
+	return definitions
 }
 
 func (c *Catalog) ValidateAndNormalize(triggerType string, rawConfig json.RawMessage) (ValidatedTrigger, error) {
-	switch strings.TrimSpace(triggerType) {
-	case TypePullRequestOpened:
-		var config struct{}
-		if err := decodeConfig(rawConfig, &config); err != nil {
-			return ValidatedTrigger{}, err
-		}
-		configJSON, err := json.Marshal(config)
-		if err != nil {
-			return ValidatedTrigger{}, err
-		}
-		return ValidatedTrigger{
-			Type:        TypePullRequestOpened,
-			EventFamily: webhook.EventTypePullRequestOpened,
-			IdentityKey: TypePullRequestOpened,
-			ConfigJSON:  configJSON,
-		}, nil
-	case TypePullRequestLabel:
-		var config pullRequestLabelConfig
-		if err := decodeConfig(rawConfig, &config); err != nil {
-			return ValidatedTrigger{}, err
-		}
-		config.Label = strings.TrimSpace(config.Label)
-		if config.Label == "" {
-			return ValidatedTrigger{}, fmt.Errorf("trigger config field label is required")
-		}
-		configJSON, err := json.Marshal(config)
-		if err != nil {
-			return ValidatedTrigger{}, err
-		}
-		return ValidatedTrigger{
-			Type:        TypePullRequestLabel,
-			EventFamily: webhook.EventTypePullRequestLabeled,
-			IdentityKey: TypePullRequestLabel + ":" + config.Label,
-			ConfigJSON:  configJSON,
-		}, nil
-	case TypePullRequestCommentCommand:
-		var config pullRequestCommentCommandConfig
-		if err := decodeConfig(rawConfig, &config); err != nil {
-			return ValidatedTrigger{}, err
-		}
-		config.Matcher = strings.TrimSpace(config.Matcher)
-		config.Command = strings.TrimSpace(config.Command)
-		if config.Matcher != CommentMatcherExactFirstLine {
-			return ValidatedTrigger{}, fmt.Errorf("trigger config field matcher must be %q", CommentMatcherExactFirstLine)
-		}
-		if config.Command == "" {
-			return ValidatedTrigger{}, fmt.Errorf("trigger config field command is required")
-		}
-		configJSON, err := json.Marshal(config)
-		if err != nil {
-			return ValidatedTrigger{}, err
-		}
-		return ValidatedTrigger{
-			Type:        TypePullRequestCommentCommand,
-			EventFamily: webhook.EventTypeIssueCommentCreated,
-			IdentityKey: TypePullRequestCommentCommand + ":" + config.Matcher + ":" + config.Command,
-			ConfigJSON:  configJSON,
-		}, nil
-	default:
+	triggerType = strings.TrimSpace(triggerType)
+	definition, ok := c.definitions[triggerType]
+	if !ok {
 		return ValidatedTrigger{}, fmt.Errorf("unsupported trigger type %q", triggerType)
 	}
+
+	configJSON, err := validateAndNormalizeConfig(definition, rawConfig)
+	if err != nil {
+		return ValidatedTrigger{}, err
+	}
+
+	return ValidatedTrigger{
+		Type:        definition.Type,
+		EventFamily: definition.EventFamily,
+		IdentityKey: definition.IdentityKey,
+		ConfigJSON:  configJSON,
+	}, nil
 }
 
 func (c *Catalog) Evaluate(trigger sqlc.RepositoryTriggers, _ string, event webhook.NormalizedEvent) (Evaluation, error) {
 	triggerSnapshotJSON, err := triggerSnapshotJSON(trigger)
 	if err != nil {
 		return Evaluation{}, err
+	}
+
+	definition, ok := c.definitions[trigger.Type]
+	if !ok {
+		return Evaluation{}, fmt.Errorf("unsupported trigger type %q", trigger.Type)
 	}
 
 	if trigger.EventFamily != event.Type {
@@ -179,35 +176,16 @@ func (c *Catalog) Evaluate(trigger sqlc.RepositoryTriggers, _ string, event webh
 		TriggerSnapshotJSON: triggerSnapshotJSON,
 	}
 
-	switch trigger.Type {
-	case TypePullRequestOpened:
-		evaluation.Matched = true
-		evaluation.Reason = "pull_request_opened_matched"
-	case TypePullRequestLabel:
-		var config pullRequestLabelConfig
-		if err := decodeConfig(trigger.ConfigJson, &config); err != nil {
-			return Evaluation{}, fmt.Errorf("decode pull_request_label config: %w", err)
-		}
-		if config.Label == event.Label {
-			evaluation.Matched = true
-			evaluation.Reason = "label_matched"
-		} else {
-			evaluation.Reason = "label_mismatch"
-		}
-	case TypePullRequestCommentCommand:
-		var config pullRequestCommentCommandConfig
-		if err := decodeConfig(trigger.ConfigJson, &config); err != nil {
-			return Evaluation{}, fmt.Errorf("decode pull_request_comment_command config: %w", err)
-		}
-		if config.Command == event.CommentFirstLine {
-			evaluation.Matched = true
-			evaluation.Reason = "comment_command_matched"
-		} else {
-			evaluation.Reason = "comment_command_mismatch"
-		}
-	default:
-		return Evaluation{}, fmt.Errorf("unsupported trigger type %q", trigger.Type)
+	configMatches, reason, err := matchesDefinitionConfig(definition, trigger.ConfigJson)
+	if err != nil {
+		return Evaluation{}, err
 	}
+	if !configMatches {
+		evaluation.Reason = reason
+		return evaluation, nil
+	}
+
+	evaluation.Matched, evaluation.Reason = definition.matchEvent(event)
 
 	if !evaluation.Matched {
 		return evaluation, nil
@@ -230,6 +208,77 @@ type pullRequestCommentCommandConfig struct {
 	Command string `json:"command"`
 }
 
+func mustMarshalRawMessage(value any) json.RawMessage {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return payload
+}
+
+func validateAndNormalizeConfig(definition definition, rawConfig json.RawMessage) ([]byte, error) {
+	if isOmittedConfig(rawConfig) {
+		return append([]byte(nil), definition.Config...), nil
+	}
+
+	normalizedConfig, err := definition.normalizeConfig(rawConfig)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(normalizedConfig, definition.Config) {
+		return nil, fmt.Errorf("trigger type %q expects config %s", definition.Type, definition.Config)
+	}
+
+	return append([]byte(nil), definition.Config...), nil
+}
+
+func matchesDefinitionConfig(definition definition, rawConfig json.RawMessage) (bool, string, error) {
+	normalizedConfig, err := definition.normalizeConfig(rawConfig)
+	if err != nil {
+		return false, "trigger_config_invalid", nil
+	}
+	if !bytes.Equal(normalizedConfig, definition.Config) {
+		return false, "trigger_config_mismatch", nil
+	}
+	return true, "", nil
+}
+
+func normalizeEmptyConfig(rawConfig json.RawMessage) ([]byte, error) {
+	var config struct{}
+	if err := decodeConfig(rawConfig, &config); err != nil {
+		return nil, err
+	}
+	return json.Marshal(config)
+}
+
+func normalizePullRequestLabelConfig(rawConfig json.RawMessage) ([]byte, error) {
+	var config pullRequestLabelConfig
+	if err := decodeConfig(rawConfig, &config); err != nil {
+		return nil, err
+	}
+	config.Label = strings.TrimSpace(config.Label)
+	if config.Label == "" {
+		return nil, fmt.Errorf("trigger config field label is required")
+	}
+	return json.Marshal(config)
+}
+
+func normalizePullRequestCommentCommandConfig(rawConfig json.RawMessage) ([]byte, error) {
+	var config pullRequestCommentCommandConfig
+	if err := decodeConfig(rawConfig, &config); err != nil {
+		return nil, err
+	}
+	config.Matcher = strings.TrimSpace(config.Matcher)
+	config.Command = strings.TrimSpace(config.Command)
+	if config.Matcher != CommentMatcherExactFirstLine {
+		return nil, fmt.Errorf("trigger config field matcher must be %q", CommentMatcherExactFirstLine)
+	}
+	if config.Command == "" {
+		return nil, fmt.Errorf("trigger config field command is required")
+	}
+	return json.Marshal(config)
+}
+
 func decodeConfig(rawConfig []byte, dst any) error {
 	payload := rawConfig
 	if len(bytes.TrimSpace(payload)) == 0 {
@@ -242,6 +291,11 @@ func decodeConfig(rawConfig []byte, dst any) error {
 		return fmt.Errorf("decode trigger config: %w", err)
 	}
 	return nil
+}
+
+func isOmittedConfig(rawConfig json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(rawConfig)
+	return len(trimmed) == 0 || bytes.Equal(trimmed, []byte("{}")) || bytes.Equal(trimmed, []byte("null"))
 }
 
 func triggerSnapshotJSON(trigger sqlc.RepositoryTriggers) ([]byte, error) {

@@ -41,16 +41,24 @@ A **Runtime Environment** of type `preview` created to expose one **Pull Request
 _Avoid_: Deployment, stack, sandbox
 
 **Trigger**:
-A repository-specific rule that authorizes Toolshed to start work for a pull request.
-_Avoid_: Hook, command, automation
+A repository-specific enablement of one built-in **Trigger Type** that authorizes Toolshed to start work for a pull request.
+_Avoid_: Generic matcher, hook, command, automation
+
+**Event Family**:
+A global built-in classification of supported GitHub webhook events that Toolshed uses to route, validate, and normalize incoming webhook payloads.
+_Avoid_: Trigger Type, webhook delivery, generic event
 
 **Trigger Type**:
-A global trigger category built into Toolshed that defines one family of event matching and the configuration shape expected by that rule.
-_Avoid_: Trigger instance, repository rule, plugin
+A global built-in trigger preset that fixes one event-matching rule and the **Operation Type** created when it matches.
+_Avoid_: Generic matcher, event family, trigger instance
 
 **Operation Type**:
 A built-in kind of runtime work that Toolshed performs after a **Trigger** matches.
 _Avoid_: Trigger Type, dispatch type, command
+
+**Operation Handler**:
+The known execution entry point bound to one **Operation Type** that runs that operation's technical workflow.
+_Avoid_: Callback, switch case, job body
 
 **Operation Outcome**:
 A machine-readable result of handling one queued operation.
@@ -96,8 +104,12 @@ _Avoid_: Server config, app config
 - A **Pull Request** has one current **Pull Request Head Commit**
 - A **Pull Request** references one current **Pull Request Source Repository**
 - A **Repository** can define multiple **Triggers**
+- A **Trigger** belongs to exactly one **Trigger Type**
+- A **Repository** can have at most one **Trigger** of a given **Trigger Type**
 - A matched **Trigger** can create one **Operation Request**
-- A **Trigger** maps to exactly one **Operation Type**
+- A **Trigger Type** maps to exactly one **Event Family**
+- A **Trigger Type** maps to exactly one **Operation Type**
+- An **Operation Type** maps to exactly one **Operation Handler**
 - An **Operation Type** is global to the system, not per **Repository**
 - An **Operation Type** targets exactly one **Runtime Environment Type**
 - An **Operation Type** defines how Toolshed handles an already existing **Runtime Environment** for the same target
@@ -129,7 +141,7 @@ _Avoid_: Server config, app config
 > **Domain expert:** "Yes — the **Runtime Environment** already exists, and its **Runtime Environment Status** tells you whether it is `preparing`, `prepared`, or `failed`."
 
 > **Dev:** "We have a `preview` label trigger and a `/preview` comment trigger. Are those two different things?"
-> **Domain expert:** "They are different **Triggers**, but they map to the same **Operation Type**, so they must not create competing **Runtime Environments** for the same target."
+> **Domain expert:** "They are different **Trigger Types** and can be enabled as different **Triggers**, but they map to the same **Operation Type**, so they must not create competing **Runtime Environments** for the same target."
 
 > **Dev:** "If someone comments `/preview` while a preview is already preparing, do we start another one?"
 > **Domain expert:** "No — the `preview-start` **Operation Type** is an ensure operation. It reuses the current attempt and reports that the preview is already preparing."
@@ -158,9 +170,21 @@ _Avoid_: Server config, app config
 - "preview environment" was being used to mean both the long-lived PR slot and one concrete lifecycle attempt. Resolved: a **Preview Environment** is per attempt; one **Pull Request** can produce multiple **Preview Environments** over time.
 - "queued preview" was being used to mean both queued asynchronous intent and a started runtime attempt. Resolved: **Operation Request** covers queued work before the worker starts; **Runtime Environment** begins when the worker starts runtime preparation.
 - A **Runtime Environment Status** for Phase 3 was unclear. Resolved: the initial status set is `preparing`, `prepared`, `failed`, and `superseded`.
-- The meaning of `prepared` was unclear. Resolved: `prepared` is a backend-agnostic **Runtime Environment Status** meaning one attempt has a ready deployment input for the next lifecycle step; in Phase 3B that means the tarball was successfully materialized and promoted from staging into the final workspace, the materialized workspace still exists, and the runtime is not yet started.
+- The meaning of `prepared` was unclear. Resolved: `prepared` is a backend-agnostic **Runtime Environment Status** meaning one attempt has successfully reached the intended ready state for the current implementation phase. In Phase 3B that means the tarball was successfully materialized and promoted from staging into the final workspace, the materialized workspace still exists, and the runtime is not yet started. In Phase 4 that means runtime deployment startup completed successfully for that attempt.
 - "preview label" and "preview comment" were being treated as separate kinds of work. Resolved: different **Triggers** can map to the same **Operation Type**, and idempotency belongs to the **Operation Type**.
+- "Trigger Type" was being used to mean a generic family of event matching. Resolved: **Trigger Type** is a built-in business preset that fixes both matching semantics and the resulting **Operation Type**.
+- It was unclear whether **Operation Type** is configured on each **Trigger**. Resolved: **Operation Type** is fixed by **Trigger Type** and is not configured separately on a repository-specific **Trigger** record.
+- It was unclear whether a repository-specific **Trigger** stores its own matching semantics. Resolved: a **Trigger** only enables one built-in **Trigger Type** for one **Repository**; matching semantics and preset config belong to the **Trigger Type** definition in code.
+- It was unclear whether a repository-specific **Trigger** carries per-repository matcher config. Resolved: a **Trigger** does not carry its own matcher config; if different matching behavior is needed, Toolshed introduces a different built-in **Trigger Type**.
+- It was unclear whether one repository can enable the same **Trigger Type** more than once. Resolved: a **Repository** can have at most one **Trigger** of a given **Trigger Type**.
+- It was unclear whether **Trigger Type** names should follow technical event families or business intent. Resolved: **Trigger Type** names follow business intent and outcome, such as `preview_on_label_preview`, rather than generic event families such as `pull_request_label`.
+- It was unclear whether supported GitHub webhook classifications should be implicit string switches or an explicit model. Resolved: **Event Family** is an explicit built-in model, and each **Trigger Type** maps to exactly one **Event Family**.
+- It was unclear whether **Event Family** only labels technical routing or also owns payload parsing. Resolved: **Event Family** owns both supported-event routing and normalization of webhook payloads into the shared trigger-input model.
+- It was unclear whether **Operation Type** should remain implicit in scattered switch statements. Resolved: **Operation Type** is an explicit built-in model with its own code-level definition, so execution behavior is extended through the registry rather than through scattered switches.
+- It was unclear whether built-in automation rules should stay split across multiple packages or multiple peer registries. Resolved: built-in automation definitions live in one central **Event Family** registry that acts as the single source of truth, with **Trigger Type** and **Operation Type** mappings hanging from those event definitions rather than from separate top-level registries.
 - It was unclear whether **Operation Type** belongs to repository configuration. Resolved: **Operation Type** is a global built-in system category, while repositories only choose which **Triggers** are enabled.
+- It was unclear how operation execution should attach to one **Operation Type**. Resolved: each **Operation Type** has one explicit **Operation Handler** as its known execution entry point instead of relying on scattered switch-based dispatch.
+- It was unclear whether **Operation Type** definitions should be repeated under each **Trigger Type**. Resolved: built-in automation stays in one central module, but each **Operation Type** definition is declared once and **Trigger Type** definitions only reference it.
 - It was unclear whether technical retries create new attempts. Resolved: retries of the same queued operation stay within the same **Runtime Environment**; a new **Runtime Environment** only starts when a new operation attempt begins.
 - It was unclear what happens after `failed`. Resolved: a later domain-level retry of the same **Operation Type** starts a new **Runtime Environment** rather than reopening the failed one.
 - It was unclear when one **Runtime Environment** attempt becomes `failed` during technical retries. Resolved: transient retries of the same **Operation Request** stay within the same attempt; the attempt becomes `failed` only after a permanent error or after the allowed retries for that request are exhausted.
@@ -199,3 +223,39 @@ _Avoid_: Server config, app config
 - "workspace path" was being tied to one job/request execution. Resolved: the materialized workspace belongs to one **Runtime Environment** attempt and is identified from that attempt, so technical retries of the same **Operation Request** reuse the same workspace locator rather than creating per-job paths.
 - It was unclear whether the materialized workspace should point at the tarball wrapper directory or the repository root itself. Resolved: the final workspace for one **Runtime Environment** attempt is the repository root after removing GitHub's tarball wrapper directory.
 - "repository" was being used to mean both the registered base repository and the repository that actually contains the pull request head commit. Resolved: **Repository** remains the registered base repository in Toolshed, while **Pull Request Source Repository** names the repository that provides the previewed head commit.
+- It was unclear whether Phase 4 deployment should introduce a separate `environment` entity alongside **Runtime Environment**. Resolved: deployment remains part of the same **Runtime Environment** attempt; no separate domain entity is introduced for that stage.
+- It was unclear whether repository materialization and runtime deployment should become separate business operations. Resolved: `preview-start` remains one **Operation Type**, and both materialization and deployment are technical steps inside that operation's execution model.
+- It was unclear whether adding deployment work should expand the coarse **Runtime Environment Status** model. Resolved: **Runtime Environment Status** remains `preparing`, `prepared`, `failed`, and `superseded`, while deployment progress is tracked through technical step state.
+- It was unclear whether deployment teardown should target a whole **Pull Request** or one concrete preview attempt. Resolved: runtime deployment identity is anchored to one **Runtime Environment** attempt, so deploy and teardown work target a specific **Runtime Environment** rather than the pull request as a whole.
+- It was unclear whether repository-scoped runtime settings should become a new domain entity. Resolved: runtime settings remain part of **Repository Configuration**; any `runtime_settings` table is a technical persistence choice for repository-scoped deployment settings, not a separate domain concept.
+- "runtime env variables" was being used to describe repository-scoped deployment configuration. Resolved: repository-scoped env vars remain part of **Repository Configuration** and belong in repository-level configuration storage, not as runtime-attempt data on one **Runtime Environment**.
+- It was unclear whether **Repository Configuration** needs a dedicated 1:1 persistence record separate from **Repository**. Resolved: **Repository** remains the persistence anchor, and repository-scoped configuration can be split across focused tables keyed by `repository_id` rather than introducing a separate `repository_configurations` row by default.
+- It was unclear how far `preview-start` step granularity should go once deployment is added. Resolved: `preview-start` keeps a small retry-oriented technical pipeline of `source_materialization`, `compose_preparation`, and `runtime_deployment` rather than expanding into many micro-steps.
+- It was unclear whether adding deployment requires a new cleanup-style business operation for runtime teardown. Resolved: `preview-cleanup-superseded` remains the same cleanup **Operation Type** for a superseded attempt and can grow from workspace-only cleanup into runtime teardown followed by workspace cleanup when deployment has already started.
+- It was unclear whether deployment and cleanup steps should read live repository configuration on every retry. Resolved: deployment input is frozen per **Runtime Environment** attempt during technical preparation so later deploy, retry, and teardown work do not depend on newer **Repository Configuration** changes.
+- It was unclear whether deployment-specific persistence should live directly on **Runtime Environment** or in a separate storage record. Resolved: deployment metadata may live in a separate technical table keyed to one **Runtime Environment** attempt without introducing a new domain entity beyond the attempt itself.
+- It was unclear whether one **Runtime Environment** attempt may accumulate many deployment records in Phase 4. Resolved: Phase 4 uses at most one deployment-metadata record per **Runtime Environment** attempt, and retries update that same record rather than creating deployment history within the same attempt.
+- It was unclear what repository-scoped configuration must be frozen into one deployment attempt. Resolved: the deployment snapshot for one **Runtime Environment** attempt freezes both repository-scoped runtime settings and the repository-scoped env vars used to prepare that deployment input.
+- It was unclear what Phase 4 deployment success should mean before repository-specific health behavior exists. Resolved: Phase 4 treats successful runtime startup plus minimal backend-level verification as enough to finish `runtime_deployment`; repository-specific health waiting remains later work.
+- It was unclear how preview deployments should avoid host port conflicts and public port exposure on the machine. Resolved: preview runtime deployment does not publish container ports onto the host; external traffic reaches previews only through the shared Traefik path, and host-published ports in preview compose input are treated as invalid deployment configuration.
+- It was unclear whether preview routing should infer its target port from compose input or from repository-scoped configuration. Resolved: repository-scoped runtime settings provide the canonical exposed service name and exposed service port used for routing, rather than inferring them from user-supplied compose declarations.
+- It was unclear how preview runtime networking should be structured to balance isolation and shared ingress. Resolved: each preview attempt uses one private per-attempt runtime network for the stack, while the exposed service additionally joins the shared Traefik-facing network used for ingress.
+- It was unclear whether preview compose validation should accept only a narrow supported subset or block only explicitly unsafe constructs. Resolved: Phase 4 uses explicit validation rules for known unsafe or unsupported constructs and then relies on rendered `docker compose config` as a backend-level sanity check, rather than treating most compose features as invalid by default.
+- It was unclear whether the runtime backend interface should stay monolithic once the preview pipeline gains technical steps. Resolved: the runtime backend contract should align with the technical pipeline so orchestration can separate deployment preparation, prepared deployment start, and deployment teardown rather than hiding all of that behind one monolithic deploy call.
+- It was unclear whether deployment preparation should persist its own database state from inside the runtime backend. Resolved: the runtime backend returns prepared deployment data to the orchestration layer, and the orchestration layer remains responsible for persisting deployment metadata and step progress in the database.
+- It was unclear whether the runtime backend should resolve repository configuration on its own. Resolved: the orchestration layer provides explicit resolved deployment input to the runtime backend, rather than letting the backend read live configuration or database state by itself.
+- It was unclear whether backend-specific deployment preparation should perform ad hoc direct filesystem calls. Resolved: runtime preparation and deployment-related file operations should flow through one shared workspace/filesystem abstraction rather than scattered direct filesystem access inside backend-specific packages.
+- It was unclear whether one shared filesystem abstraction should be flat or scoped to a single runtime attempt. Resolved: workspace lifecycle concerns stay on a higher-level manager, while file operations inside one runtime-attempt workspace use a scoped workspace handle rather than a global grab-bag filesystem interface.
+- It was unclear whether a scoped workspace handle may expose real filesystem paths needed by backend tooling. Resolved: the workspace abstraction may provide a narrow path-resolution escape hatch for files already proven to live inside one runtime-attempt workspace, so backend tooling can invoke external commands without bypassing workspace safety rules.
+- It was unclear how repository-scoped compose file configuration should resolve against deployment input on disk. Resolved: repository runtime settings store the compose file path relative to the runtime-attempt workspace root, and deployment preparation rejects absolute paths, escaping paths, and missing compose files rather than resolving them outside the workspace.
+- It was unclear whether repository runtime settings should appear only after preview deployment is fully configured. Resolved: repository-scoped runtime settings are created as the default 1:1 settings record for a repository and may remain incomplete until the operator fills in deployment-specific values needed by later preview work.
+- It was unclear whether incomplete repository runtime settings should block trigger ingestion before a runtime attempt exists. Resolved: trigger evaluation and operation-request creation still proceed, while deployment preparation fails the resulting runtime attempt if required repository runtime settings are missing or invalid for that attempt.
+- It was unclear what should happen if runtime deployment partially creates Docker resources and then fails. Resolved: a failed deployment attempt performs best-effort runtime teardown immediately before the attempt is finalized as `failed`, while keeping workspace and attempt metadata available for diagnosis if teardown itself is imperfect.
+- It was unclear whether preview runtime failures should all follow the same retry policy. Resolved: deployment preparation and deployment execution distinguish permanent configuration-style failures from retryable infrastructure-style failures, so deterministic misconfiguration does not consume worker retries like transient runtime outages.
+- It was unclear how retry classification should cross the runtime-backend boundary. Resolved: runtime preparation and deployment still return ordinary wrapped errors, while a small shared error-classification wrapper marks failures as permanent or retryable without changing the basic `error` contract between layers.
+- It was unclear whether permanent runtime preparation or deployment failures should still consume queue retries until the maximum attempt count. Resolved: permanent failures are finalized immediately on the current attempt, while only retryable failures are left to the queue retry policy.
+- It was unclear whether repository runtime settings for Phase 4 should already absorb future health, lifecycle, or resource-policy concerns. Resolved: Phase 4 keeps repository runtime settings minimal and deployment-focused, limited to the fields needed to locate the compose file and define the canonical exposed service and port for routing.
+- It was unclear whether later technical steps in one operation should pass through extra `pending` states between successful step completions. Resolved: only the initial technical step starts in `pending`; once execution begins, successful step completion may move directly into the next step's `in_progress` state rather than creating extra intermediate pending states.
+- It was unclear how retries should resume after later technical steps have already started. Resolved: retries restart the current technical step for the same **Runtime Environment** attempt, so deployment preparation can rebuild the frozen deployment input for that attempt, while runtime deployment retries reuse the already frozen deployment input rather than re-reading live repository configuration.
+- It was unclear when a `prepared` runtime attempt remains trustworthy enough to be reused by a later ensure-style request. Resolved: a later request may reuse a `prepared` attempt only while the attempt still has the local artifacts that define that prepared state for the current phase, rather than trusting the coarse status field alone after supporting artifacts disappear.
+- It was unclear whether later implementation phases should rename high-level operation outcomes as the technical pipeline deepens. Resolved: high-level **Operation Outcome** names such as `already_preparing` and `already_prepared` stay stable across later technical phases, while finer-grained deployment detail remains visible through technical step state and step details rather than new outcome names.
