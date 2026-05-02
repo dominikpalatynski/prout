@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/dominikpalatynski/toolshed/internal/pullrequests"
 	"github.com/dominikpalatynski/toolshed/internal/webhook"
 )
 
@@ -37,12 +38,28 @@ func TestBuildTriggerSnapshotFreezesTargetCommit(t *testing.T) {
 
 	githubPullRequestID := int64(9988)
 	snapshotJSON, err := BuildTriggerSnapshot(TriggerSnapshotInput{
-		RepositoryID:           7,
-		PullRequestID:          13,
-		PRNumber:               42,
-		GithubPullRequestID:    &githubPullRequestID,
-		DeliveryID:             "delivery-1",
-		Event:                  webhook.NormalizedEvent{Type: webhook.EventTypePullRequestOpened, PRNumber: 42, PRHeadSHA: "abc123"},
+		RepositoryID:        7,
+		PullRequestID:       13,
+		PRNumber:            42,
+		GithubPullRequestID: &githubPullRequestID,
+		PRSourceRepository: pullrequests.SourceRepository{
+			GithubRepositoryID: 101,
+			Owner:              "acme",
+			Name:               "demo",
+			FullName:           "acme/demo",
+		},
+		DeliveryID: "delivery-1",
+		Event: webhook.NormalizedEvent{
+			Type:      webhook.EventTypePullRequestOpened,
+			PRNumber:  42,
+			PRHeadSHA: "abc123",
+			PRSourceRepository: pullrequests.SourceRepository{
+				GithubRepositoryID: 101,
+				Owner:              "acme",
+				Name:               "demo",
+				FullName:           "acme/demo",
+			},
+		},
 		TriggerID:              5,
 		TriggerType:            "pull_request_opened",
 		TriggerIdentityKey:     "pull_request_opened",
@@ -60,6 +77,9 @@ func TestBuildTriggerSnapshotFreezesTargetCommit(t *testing.T) {
 			RuntimeEnvironmentType string `json:"runtime_environment_type"`
 			TargetPRHeadCommitSHA  string `json:"target_pr_head_commit_sha"`
 			PRNumber               int64  `json:"pr_number"`
+			PullRequestSourceRepo  struct {
+				FullName string `json:"full_name"`
+			} `json:"pull_request_source_repository"`
 		} `json:"target"`
 		Delivery struct {
 			ID    string                  `json:"id"`
@@ -78,6 +98,9 @@ func TestBuildTriggerSnapshotFreezesTargetCommit(t *testing.T) {
 	}
 	if snapshot.Target.TargetPRHeadCommitSHA != "abc123" {
 		t.Fatalf("snapshot target_pr_head_commit_sha = %q, want %q", snapshot.Target.TargetPRHeadCommitSHA, "abc123")
+	}
+	if snapshot.Target.PullRequestSourceRepo.FullName != "acme/demo" {
+		t.Fatalf("snapshot target pull_request_source_repository.full_name = %q, want %q", snapshot.Target.PullRequestSourceRepo.FullName, "acme/demo")
 	}
 	if snapshot.Delivery.ID != "delivery-1" {
 		t.Fatalf("snapshot delivery id = %q, want %q", snapshot.Delivery.ID, "delivery-1")

@@ -33,6 +33,7 @@ func (s *Server) mount(r chi.Router) {
 		protected.Get("/repositories/{repositoryID}/triggers", s.listRepositoryTriggers)
 		protected.Post("/repositories/{repositoryID}/triggers", s.upsertRepositoryTrigger)
 		protected.Patch("/repositories/{repositoryID}/triggers/{triggerID}", s.patchRepositoryTrigger)
+		protected.Get("/runtime-environments", s.listRuntimeEnvironments)
 		protected.Get("/webhook-events", s.listWebhookEvents)
 		protected.Get("/webhook-events/{webhookEventID}", s.getWebhookEvent)
 	})

@@ -13,12 +13,15 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"github.com/dominikpalatynski/toolshed/internal/config"
 	"github.com/dominikpalatynski/toolshed/internal/githubapp"
+	"github.com/dominikpalatynski/toolshed/internal/jobs"
 	applog "github.com/dominikpalatynski/toolshed/internal/log"
 	"github.com/dominikpalatynski/toolshed/internal/store"
 	"github.com/dominikpalatynski/toolshed/internal/triggers"
+	"github.com/dominikpalatynski/toolshed/internal/workspaces"
 )
 
 type Server struct {
@@ -43,16 +46,32 @@ func New(cfg *config.Config) (*Server, error) {
 	startupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	pool, pingStore, riverClient, err := bootstrap(startupCtx, cfg, logger)
+	pool, pingStore, err := bootstrap(startupCtx, cfg, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	githubResolver, err := githubapp.New(cfg.GitHub)
+	githubClient, err := githubapp.New(cfg.GitHub)
 	if err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("init github app client: %w", err)
 	}
+
+	workspaceManager := workspaces.NewFilesystemManager(cfg.Storage.Filesystem.WorkspaceRoot)
+	workers, operationRequestWorker := jobs.NewWorkers(pingStore, logger, githubClient, workspaceManager)
+	operationRequestWorker.SetJobTimeout(cfg.Jobs.OperationRequestTimeout)
+	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
+		Logger: logger,
+		Queues: map[string]river.QueueConfig{
+			river.QueueDefault: {MaxWorkers: 1},
+		},
+		Workers: workers,
+	})
+	if err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("init river client: %w", err)
+	}
+	operationRequestWorker.SetJobEnqueuer(riverClient)
 
 	r := chi.NewRouter()
 	s := &Server{
@@ -61,7 +80,7 @@ func New(cfg *config.Config) (*Server, error) {
 		pool:           pool,
 		store:          pingStore,
 		riverClient:    riverClient,
-		githubResolver: githubResolver,
+		githubResolver: githubClient,
 		triggerCatalog: triggers.NewCatalog(),
 	}
 	s.mount(r)

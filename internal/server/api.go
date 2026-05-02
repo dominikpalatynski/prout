@@ -99,6 +99,54 @@ func (s *Server) listRepositories(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) listRuntimeEnvironments(w http.ResponseWriter, r *http.Request) {
+	repositoryID, err := queryInt64(r, "repository_id")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	prNumber, err := queryInt64(r, "pr_number")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+	if prNumber != nil && repositoryID == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "repository_id is required when pr_number is set",
+		})
+		return
+	}
+
+	items, err := s.store.ListRuntimeEnvironments(r.Context(), store.ListRuntimeEnvironmentsParams{
+		RepositoryID: repositoryID,
+		PRNumber:     prNumber,
+	})
+	if err != nil {
+		s.logger.ErrorContext(r.Context(), "list runtime environments failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "failed to list runtime environments",
+		})
+		return
+	}
+
+	response := make([]runtimeEnvironmentListItemResponse, 0, len(items))
+	for _, item := range items {
+		response = append(response, runtimeEnvironmentListItemResponse{
+			RuntimeEnvironment: runtimeEnvironmentResponseFromModel(item.RuntimeEnvironment),
+			PullRequest:        pullRequestSummaryResponseFromModel(item.PullRequest),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runtime_environments": response,
+	})
+}
+
 func (s *Server) patchRepository(w http.ResponseWriter, r *http.Request) {
 	repositoryID, err := pathInt64(r, "repositoryID")
 	if err != nil {
@@ -498,15 +546,40 @@ type webhookEventTriggerEvaluationResponse struct {
 	CreatedAt           time.Time       `json:"created_at"`
 }
 
+type pullRequestSourceRepositoryResponse struct {
+	GithubRepositoryID int64  `json:"github_repository_id"`
+	Owner              string `json:"owner"`
+	Name               string `json:"name"`
+	FullName           string `json:"full_name"`
+}
+
+type pullRequestSummaryResponse struct {
+	ID                      int64                               `json:"id"`
+	RepositoryID            int64                               `json:"repository_id"`
+	PRNumber                int64                               `json:"pr_number"`
+	GithubPullRequestID     *int64                              `json:"github_pull_request_id,omitempty"`
+	CurrentHeadCommitSHA    string                              `json:"current_head_commit_sha"`
+	CurrentSourceRepository pullRequestSourceRepositoryResponse `json:"current_source_repository"`
+	CreatedAt               time.Time                           `json:"created_at"`
+	UpdatedAt               time.Time                           `json:"updated_at"`
+}
+
 type runtimeEnvironmentResponse struct {
-	ID                    int64     `json:"id"`
-	RepositoryID          int64     `json:"repository_id"`
-	PullRequestID         int64     `json:"pull_request_id"`
-	Type                  string    `json:"type"`
-	Status                string    `json:"status"`
-	TargetPRHeadCommitSHA string    `json:"target_pr_head_commit_sha"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	ID                    int64                               `json:"id"`
+	RepositoryID          int64                               `json:"repository_id"`
+	PullRequestID         int64                               `json:"pull_request_id"`
+	Type                  string                              `json:"type"`
+	Status                string                              `json:"status"`
+	TargetPRHeadCommitSHA string                              `json:"target_pr_head_commit_sha"`
+	SourceRepository      pullRequestSourceRepositoryResponse `json:"source_repository"`
+	WorkspaceLocator      string                              `json:"workspace_locator"`
+	CreatedAt             time.Time                           `json:"created_at"`
+	UpdatedAt             time.Time                           `json:"updated_at"`
+}
+
+type runtimeEnvironmentListItemResponse struct {
+	RuntimeEnvironment runtimeEnvironmentResponse `json:"runtime_environment"`
+	PullRequest        pullRequestSummaryResponse `json:"pull_request"`
 }
 
 type operationRequestResponse struct {
@@ -523,6 +596,9 @@ type operationRequestResponse struct {
 	Status                          string                      `json:"status"`
 	TargetPRHeadCommitSHA           string                      `json:"target_pr_head_commit_sha"`
 	IntentSnapshotJSON              json.RawMessage             `json:"intent_snapshot_json,omitempty"`
+	CurrentStep                     string                      `json:"current_step"`
+	CurrentStepState                string                      `json:"current_step_state"`
+	CurrentStepDetailsJSON          json.RawMessage             `json:"current_step_details_json,omitempty"`
 	Outcome                         *string                     `json:"outcome,omitempty"`
 	LastError                       *string                     `json:"last_error,omitempty"`
 	HandledAt                       *time.Time                  `json:"handled_at,omitempty"`
@@ -594,6 +670,36 @@ func webhookEventTriggerEvaluationResponseFromModel(record sqlc.WebhookEventTrig
 	return response
 }
 
+func pullRequestSourceRepositoryResponseFromValues(
+	githubRepositoryID int64,
+	owner, name, fullName string,
+) pullRequestSourceRepositoryResponse {
+	return pullRequestSourceRepositoryResponse{
+		GithubRepositoryID: githubRepositoryID,
+		Owner:              owner,
+		Name:               name,
+		FullName:           fullName,
+	}
+}
+
+func pullRequestSummaryResponseFromModel(record sqlc.PullRequests) pullRequestSummaryResponse {
+	return pullRequestSummaryResponse{
+		ID:                   record.ID,
+		RepositoryID:         record.RepositoryID,
+		PRNumber:             record.PRNumber,
+		GithubPullRequestID:  record.GithubPullRequestID,
+		CurrentHeadCommitSHA: record.CurrentHeadCommitSha,
+		CurrentSourceRepository: pullRequestSourceRepositoryResponseFromValues(
+			record.CurrentSourceGithubRepositoryID,
+			record.CurrentSourceOwner,
+			record.CurrentSourceName,
+			record.CurrentSourceFullName,
+		),
+		CreatedAt: mustTime(record.CreatedAt),
+		UpdatedAt: mustTime(record.UpdatedAt),
+	}
+}
+
 func runtimeEnvironmentResponseFromModel(record sqlc.RuntimeEnvironments) runtimeEnvironmentResponse {
 	return runtimeEnvironmentResponse{
 		ID:                    record.ID,
@@ -602,8 +708,15 @@ func runtimeEnvironmentResponseFromModel(record sqlc.RuntimeEnvironments) runtim
 		Type:                  record.Type,
 		Status:                record.Status,
 		TargetPRHeadCommitSHA: record.TargetPrHeadCommitSha,
-		CreatedAt:             mustTime(record.CreatedAt),
-		UpdatedAt:             mustTime(record.UpdatedAt),
+		SourceRepository: pullRequestSourceRepositoryResponseFromValues(
+			record.SourceGithubRepositoryID,
+			record.SourceOwner,
+			record.SourceName,
+			record.SourceFullName,
+		),
+		WorkspaceLocator: stringPtrValue(record.WorkspaceLocator),
+		CreatedAt:        mustTime(record.CreatedAt),
+		UpdatedAt:        mustTime(record.UpdatedAt),
 	}
 }
 
@@ -629,6 +742,8 @@ func operationRequestResponseFromDetail(detail store.WebhookEventOperationReques
 		Source:                          record.Source,
 		Status:                          record.Status,
 		TargetPRHeadCommitSHA:           record.TargetPrHeadCommitSha,
+		CurrentStep:                     record.CurrentStep,
+		CurrentStepState:                record.CurrentStepState,
 		Outcome:                         record.Outcome,
 		LastError:                       record.LastError,
 		HandledAt:                       handledAt,
@@ -636,6 +751,9 @@ func operationRequestResponseFromDetail(detail store.WebhookEventOperationReques
 	}
 	if includeSnapshot {
 		response.IntentSnapshotJSON = append(json.RawMessage(nil), record.IntentSnapshotJson...)
+	}
+	if len(record.CurrentStepDetailsJson) > 0 {
+		response.CurrentStepDetailsJSON = append(json.RawMessage(nil), record.CurrentStepDetailsJson...)
 	}
 	if detail.RuntimeEnvironment != nil {
 		runtimeEnvironment := runtimeEnvironmentResponseFromModel(*detail.RuntimeEnvironment)
@@ -697,6 +815,19 @@ func queryBool(r *http.Request, key string, defaultValue bool) (bool, error) {
 	return parsed, nil
 }
 
+func queryInt64(r *http.Request, key string) (*int64, error) {
+	value := strings.TrimSpace(r.URL.Query().Get(key))
+	if value == "" {
+		return nil, nil
+	}
+
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
+		return nil, fmt.Errorf("%s must be a positive integer", key)
+	}
+	return &parsed, nil
+}
+
 func isAllowed(value string, allowed ...string) bool {
 	for _, candidate := range allowed {
 		if value == candidate {
@@ -711,4 +842,11 @@ func mustTime(ts pgtype.Timestamptz) time.Time {
 		return time.Time{}
 	}
 	return ts.Time.UTC()
+}
+
+func stringPtrValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

@@ -5,27 +5,23 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"github.com/dominikpalatynski/toolshed/internal/config"
-	"github.com/dominikpalatynski/toolshed/internal/jobs"
 	"github.com/dominikpalatynski/toolshed/internal/store"
 	"github.com/dominikpalatynski/toolshed/migrations"
 )
 
-func bootstrap(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*pgxpool.Pool, *store.Store, *river.Client[pgx.Tx], error) {
+func bootstrap(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*pgxpool.Pool, *store.Store, error) {
 	pool, err := store.NewPool(ctx, cfg.DB.DSN)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("open postgres pool: %w", err)
+		return nil, nil, fmt.Errorf("open postgres pool: %w", err)
 	}
 
-	closePoolOnError := func(err error) (*pgxpool.Pool, *store.Store, *river.Client[pgx.Tx], error) {
+	closePoolOnError := func(err error) (*pgxpool.Pool, *store.Store, error) {
 		pool.Close()
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	if err := pool.Ping(ctx); err != nil {
@@ -54,19 +50,5 @@ func bootstrap(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*p
 		)
 	}
 
-	pingStore := store.New(pool)
-	workers := jobs.NewWorkers(pingStore, logger)
-
-	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Logger: logger,
-		Queues: map[string]river.QueueConfig{
-			river.QueueDefault: {MaxWorkers: 1},
-		},
-		Workers: workers,
-	})
-	if err != nil {
-		return closePoolOnError(fmt.Errorf("init river client: %w", err))
-	}
-
-	return pool, pingStore, riverClient, nil
+	return pool, store.New(pool), nil
 }

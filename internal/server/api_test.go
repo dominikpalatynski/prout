@@ -92,11 +92,68 @@ func TestWebhookEventDetailResponsesIncludeHeavyFieldsWhenRequested(t *testing.T
 	}
 }
 
+func TestRuntimeEnvironmentResponsesIncludeSourceRepositoryAndWorkspaceLocator(t *testing.T) {
+	t.Parallel()
+
+	response := runtimeEnvironmentResponseFromModel(sqlc.RuntimeEnvironments{
+		ID:                       11,
+		RepositoryID:             7,
+		PullRequestID:            9,
+		Type:                     "preview",
+		Status:                   "prepared",
+		TargetPrHeadCommitSha:    "abc123",
+		SourceGithubRepositoryID: 501,
+		SourceOwner:              "acme",
+		SourceName:               "demo",
+		SourceFullName:           "acme/demo",
+		WorkspaceLocator:         strPtr("runtime-environments/11"),
+		CreatedAt:                validTimestamp(),
+		UpdatedAt:                validTimestamp(),
+	})
+
+	if response.SourceRepository.FullName != "acme/demo" {
+		t.Fatalf("SourceRepository.FullName = %q, want %q", response.SourceRepository.FullName, "acme/demo")
+	}
+	if response.WorkspaceLocator != "runtime-environments/11" {
+		t.Fatalf("WorkspaceLocator = %q, want %q", response.WorkspaceLocator, "runtime-environments/11")
+	}
+}
+
+func TestPullRequestSummaryResponseIncludesCurrentSourceRepository(t *testing.T) {
+	t.Parallel()
+
+	response := pullRequestSummaryResponseFromModel(sqlc.PullRequests{
+		ID:                              9,
+		RepositoryID:                    7,
+		PRNumber:                        42,
+		GithubPullRequestID:             int64Ptr(12345),
+		CurrentHeadCommitSha:            "abc123",
+		CurrentSourceGithubRepositoryID: 501,
+		CurrentSourceOwner:              "acme",
+		CurrentSourceName:               "demo",
+		CurrentSourceFullName:           "acme/demo",
+		CreatedAt:                       validTimestamp(),
+		UpdatedAt:                       validTimestamp(),
+	})
+
+	if response.CurrentSourceRepository.FullName != "acme/demo" {
+		t.Fatalf("CurrentSourceRepository.FullName = %q, want %q", response.CurrentSourceRepository.FullName, "acme/demo")
+	}
+}
+
 func validTimestamp() pgtype.Timestamptz {
 	return pgtype.Timestamptz{
 		Time:  time.Date(2026, time.May, 1, 13, 31, 0, 0, time.UTC),
 		Valid: true,
 	}
+}
+
+func int64Ptr(value int64) *int64 {
+	return &value
+}
+
+func strPtr(value string) *string {
+	return &value
 }
 
 func TestWebhookEventDetailResponsesStillMarshalCleanlyWithoutHeavyFields(t *testing.T) {

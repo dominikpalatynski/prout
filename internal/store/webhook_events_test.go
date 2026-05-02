@@ -71,21 +71,29 @@ func TestGetWebhookEventDetailHydratesOperationRequestsWithRuntimeEnvironment(t 
 	}
 
 	pullRequest, err := appStore.Q().UpsertPullRequestAnchor(ctx, sqlc.UpsertPullRequestAnchorParams{
-		RepositoryID:         repository.ID,
-		PRNumber:             42,
-		GithubPullRequestID:  int64Ptr(7001),
-		CurrentHeadCommitSha: "abc123",
+		RepositoryID:                    repository.ID,
+		PRNumber:                        42,
+		GithubPullRequestID:             int64Ptr(7001),
+		CurrentHeadCommitSha:            "abc123",
+		CurrentSourceGithubRepositoryID: repository.GithubRepositoryID,
+		CurrentSourceOwner:              repository.Owner,
+		CurrentSourceName:               repository.Name,
+		CurrentSourceFullName:           repository.FullName,
 	})
 	if err != nil {
 		t.Fatalf("UpsertPullRequestAnchor() error = %v", err)
 	}
 
 	runtimeEnvironment, err := appStore.Q().InsertRuntimeEnvironment(ctx, sqlc.InsertRuntimeEnvironmentParams{
-		RepositoryID:          repository.ID,
-		PullRequestID:         pullRequest.ID,
-		Type:                  operations.RuntimeEnvironmentTypePreview,
-		Status:                operations.RuntimeStatusPreparing,
-		TargetPrHeadCommitSha: "abc123",
+		RepositoryID:             repository.ID,
+		PullRequestID:            pullRequest.ID,
+		Type:                     operations.RuntimeEnvironmentTypePreview,
+		Status:                   operations.RuntimeStatusPreparing,
+		TargetPrHeadCommitSha:    "abc123",
+		SourceGithubRepositoryID: repository.GithubRepositoryID,
+		SourceOwner:              repository.Owner,
+		SourceName:               repository.Name,
+		SourceFullName:           repository.FullName,
 	})
 	if err != nil {
 		t.Fatalf("InsertRuntimeEnvironment() error = %v", err)
@@ -102,6 +110,9 @@ func TestGetWebhookEventDetailHydratesOperationRequestsWithRuntimeEnvironment(t 
 		Status:                          operations.StatusQueued,
 		TargetPrHeadCommitSha:           "abc123",
 		IntentSnapshotJson:              []byte(`{"target":{"target_pr_head_commit_sha":"abc123"}}`),
+		CurrentStep:                     operations.StepSourceMaterialization,
+		CurrentStepState:                operations.StepStatePending,
+		CurrentStepDetailsJson:          nil,
 	})
 	if err != nil {
 		t.Fatalf("InsertOperationRequest() error = %v", err)

@@ -2,6 +2,14 @@
 server:
   bind: ":8080"
 
+storage:
+  backend: filesystem
+  filesystem:
+    workspace_root: /var/lib/toolshed/workspaces
+
+jobs:
+  operation_request_timeout: 10m
+
 db:
   dsn: "postgres://toolshed:toolshed@localhost:5433/toolshed?sslmode=disable"
 
@@ -15,6 +23,7 @@ github:
   private_key_path: /etc/toolshed/github-app.pem
   webhook_secret: replace-me
   api_base_url: https://api.github.com
+  api_timeout: 10s
 
 operator:
   bearer_token: replace-me

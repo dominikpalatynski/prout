@@ -15,6 +15,7 @@ import (
 	"github.com/dominikpalatynski/toolshed/internal/githubapp"
 	"github.com/dominikpalatynski/toolshed/internal/jobs"
 	"github.com/dominikpalatynski/toolshed/internal/operations"
+	"github.com/dominikpalatynski/toolshed/internal/pullrequests"
 	"github.com/dominikpalatynski/toolshed/internal/store"
 	"github.com/dominikpalatynski/toolshed/internal/store/sqlc"
 	"github.com/dominikpalatynski/toolshed/internal/testdb"
@@ -33,10 +34,20 @@ func TestProcessSupportedVerifiedDeliveryCreatesOperationRequestForCommentTrigge
 	trigger := mustCreateCommentTrigger(t, ctx, appStore, repository.ID)
 
 	server := &Server{
-		logger:         logger,
-		store:          appStore,
-		riverClient:    riverClient,
-		githubResolver: stubGitHubResolver{pullRequest: githubapp.PullRequest{GithubPullRequestID: 12345, Number: 42, HeadSHA: "resolved-head-sha"}},
+		logger:      logger,
+		store:       appStore,
+		riverClient: riverClient,
+		githubResolver: stubGitHubResolver{pullRequest: githubapp.PullRequest{
+			GithubPullRequestID: 12345,
+			Number:              42,
+			HeadSHA:             "resolved-head-sha",
+			SourceRepository: pullrequests.SourceRepository{
+				GithubRepositoryID: repository.GithubRepositoryID,
+				Owner:              repository.Owner,
+				Name:               repository.Name,
+				FullName:           repository.FullName,
+			},
+		}},
 		triggerCatalog: triggers.NewCatalog(),
 	}
 
@@ -79,6 +90,9 @@ func TestProcessSupportedVerifiedDeliveryCreatesOperationRequestForCommentTrigge
 	if pullRequest.CurrentHeadCommitSha != "resolved-head-sha" {
 		t.Fatalf("pull request current_head_commit_sha = %q, want %q", pullRequest.CurrentHeadCommitSha, "resolved-head-sha")
 	}
+	if pullRequest.CurrentSourceFullName != repository.FullName {
+		t.Fatalf("pull request current_source_full_name = %q, want %q", pullRequest.CurrentSourceFullName, repository.FullName)
+	}
 
 	operationRequests, err := appStore.Q().ListWebhookEventOperationRequests(ctx, &result.Event.ID)
 	if err != nil {
@@ -101,6 +115,12 @@ func TestProcessSupportedVerifiedDeliveryCreatesOperationRequestForCommentTrigge
 	if operationRequest.Status != operations.StatusQueued {
 		t.Fatalf("operation request status = %q, want %q", operationRequest.Status, operations.StatusQueued)
 	}
+	if operationRequest.CurrentStep != operations.StepSourceMaterialization {
+		t.Fatalf("operation request current_step = %q, want %q", operationRequest.CurrentStep, operations.StepSourceMaterialization)
+	}
+	if operationRequest.CurrentStepState != operations.StepStatePending {
+		t.Fatalf("operation request current_step_state = %q, want %q", operationRequest.CurrentStepState, operations.StepStatePending)
+	}
 	if operationRequest.TargetPrHeadCommitSha != "resolved-head-sha" {
 		t.Fatalf("operation request target_pr_head_commit_sha = %q, want %q", operationRequest.TargetPrHeadCommitSha, "resolved-head-sha")
 	}
@@ -110,6 +130,9 @@ func TestProcessSupportedVerifiedDeliveryCreatesOperationRequestForCommentTrigge
 			PullRequestID         int64  `json:"pull_request_id"`
 			OperationType         string `json:"operation_type"`
 			TargetPRHeadCommitSHA string `json:"target_pr_head_commit_sha"`
+			PullRequestSourceRepo struct {
+				FullName string `json:"full_name"`
+			} `json:"pull_request_source_repository"`
 		} `json:"target"`
 	}
 	if err := json.Unmarshal(operationRequest.IntentSnapshotJson, &snapshot); err != nil {
@@ -123,6 +146,9 @@ func TestProcessSupportedVerifiedDeliveryCreatesOperationRequestForCommentTrigge
 	}
 	if snapshot.Target.TargetPRHeadCommitSHA != "resolved-head-sha" {
 		t.Fatalf("snapshot target_pr_head_commit_sha = %q, want %q", snapshot.Target.TargetPRHeadCommitSHA, "resolved-head-sha")
+	}
+	if snapshot.Target.PullRequestSourceRepo.FullName != repository.FullName {
+		t.Fatalf("snapshot target pull_request_source_repository.full_name = %q, want %q", snapshot.Target.PullRequestSourceRepo.FullName, repository.FullName)
 	}
 
 	var runtimeEnvironmentCount int
@@ -162,7 +188,10 @@ func newTestRiverClient(t *testing.T, pool *pgxpool.Pool, appStore *store.Store,
 		Queues: map[string]river.QueueConfig{
 			river.QueueDefault: {MaxWorkers: 1},
 		},
-		Workers: jobs.NewWorkers(appStore, logger),
+		Workers: func() *river.Workers {
+			workers, _ := jobs.NewWorkers(appStore, logger, nil, nil)
+			return workers
+		}(),
 	})
 	if err != nil {
 		t.Fatalf("river.NewClient() error = %v", err)

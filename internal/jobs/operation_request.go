@@ -5,10 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 
+	"github.com/dominikpalatynski/toolshed/internal/config"
+	"github.com/dominikpalatynski/toolshed/internal/githubapp"
 	applog "github.com/dominikpalatynski/toolshed/internal/log"
 	"github.com/dominikpalatynski/toolshed/internal/operations"
 	"github.com/dominikpalatynski/toolshed/internal/store"
@@ -26,15 +30,47 @@ type OperationRequestWorker struct {
 
 	logger *slog.Logger
 	store  *store.Store
+
+	githubDownloader githubapp.TarballDownloader
+	workspaceManager workspaceManager
+	jobEnqueuer      operationRequestEnqueuer
+	jobTimeout       time.Duration
 }
 
-func NewWorkers(appStore *store.Store, logger *slog.Logger) *river.Workers {
+type operationRequestEnqueuer interface {
+	InsertTx(context.Context, pgx.Tx, river.JobArgs, *river.InsertOpts) (*rivertype.JobInsertResult, error)
+}
+
+func (w *OperationRequestWorker) SetJobEnqueuer(enqueuer operationRequestEnqueuer) {
+	w.jobEnqueuer = enqueuer
+}
+
+func (w *OperationRequestWorker) SetJobTimeout(timeout time.Duration) {
+	w.jobTimeout = timeout
+}
+
+func NewWorkers(
+	appStore *store.Store,
+	logger *slog.Logger,
+	githubDownloader githubapp.TarballDownloader,
+	workspaceManager workspaceManager,
+) (*river.Workers, *OperationRequestWorker) {
 	workers := river.NewWorkers()
-	river.AddWorker(workers, &OperationRequestWorker{
-		logger: logger,
-		store:  appStore,
-	})
-	return workers
+	worker := &OperationRequestWorker{
+		logger:           logger,
+		store:            appStore,
+		githubDownloader: githubDownloader,
+		workspaceManager: workspaceManager,
+	}
+	river.AddWorker(workers, worker)
+	return workers, worker
+}
+
+func (w *OperationRequestWorker) Timeout(*river.Job[OperationRequestArgs]) time.Duration {
+	if w.jobTimeout > 0 {
+		return w.jobTimeout
+	}
+	return config.DefaultOperationRequestJobTimeout
 }
 
 func (w *OperationRequestWorker) Work(ctx context.Context, job *river.Job[OperationRequestArgs]) error {
@@ -64,13 +100,10 @@ func (w *OperationRequestWorker) Work(ctx context.Context, job *river.Job[Operat
 	}
 
 	if err := w.handleOperationRequest(ctx, operationRequest); err != nil {
-		message := err.Error()
-		if _, updateErr := w.store.Q().MarkOperationRequestFailed(ctx, sqlc.MarkOperationRequestFailedParams{
-			ID:        operationRequest.ID,
-			Outcome:   strPtr(operations.OutcomeOperationFailed),
-			LastError: &message,
-		}); updateErr != nil {
-			return errors.Join(fmt.Errorf("handle operation request: %w", err), fmt.Errorf("mark operation request failed: %w", updateErr))
+		if job.JobRow.Attempt >= job.JobRow.MaxAttempts {
+			if updateErr := w.finalizeOperationRequestFailure(ctx, operationRequest.ID, err); updateErr != nil {
+				return errors.Join(fmt.Errorf("handle operation request: %w", err), fmt.Errorf("mark operation request failed: %w", updateErr))
+			}
 		}
 		return fmt.Errorf("handle operation request: %w", err)
 	}
@@ -87,79 +120,11 @@ func (w *OperationRequestWorker) handleOperationRequest(ctx context.Context, ope
 	switch operationRequest.OperationType {
 	case operations.TypePreviewStart:
 		return w.handlePreviewStart(ctx, operationRequest)
+	case operations.TypePreviewCleanupSuperseded:
+		return w.handlePreviewCleanupSuperseded(ctx, operationRequest)
 	default:
 		return fmt.Errorf("unsupported operation type %q", operationRequest.OperationType)
 	}
-}
-
-func (w *OperationRequestWorker) handlePreviewStart(ctx context.Context, operationRequest sqlc.OperationRequests) error {
-	return w.store.Tx(ctx, func(q *sqlc.Queries, _ pgx.Tx) error {
-		runtimeEnvironmentType, err := operations.RuntimeEnvironmentTypeForOperation(operationRequest.OperationType)
-		if err != nil {
-			return err
-		}
-
-		runtimeEnvironment, outcome, err := ensureRuntimeEnvironment(ctx, q, ensureRuntimeEnvironmentParams{
-			RepositoryID:           operationRequest.RepositoryID,
-			PullRequestID:          operationRequest.PullRequestID,
-			RuntimeEnvironmentType: runtimeEnvironmentType,
-			TargetPRHeadCommitSHA:  operationRequest.TargetPrHeadCommitSha,
-		})
-		if err != nil {
-			return err
-		}
-
-		if _, err := q.MarkOperationRequestHandled(ctx, sqlc.MarkOperationRequestHandledParams{
-			ID:                   operationRequest.ID,
-			RuntimeEnvironmentID: &runtimeEnvironment.ID,
-			Outcome:              &outcome,
-		}); err != nil {
-			return fmt.Errorf("mark operation request handled: %w", err)
-		}
-
-		return nil
-	})
-}
-
-type ensureRuntimeEnvironmentParams struct {
-	RepositoryID           int64
-	PullRequestID          int64
-	RuntimeEnvironmentType string
-	TargetPRHeadCommitSHA  string
-}
-
-func ensureRuntimeEnvironment(ctx context.Context, q *sqlc.Queries, params ensureRuntimeEnvironmentParams) (sqlc.RuntimeEnvironments, string, error) {
-	runtimeEnvironment, err := q.GetLatestRuntimeEnvironmentByTarget(ctx, sqlc.GetLatestRuntimeEnvironmentByTargetParams{
-		RepositoryID:          params.RepositoryID,
-		PullRequestID:         params.PullRequestID,
-		Type:                  params.RuntimeEnvironmentType,
-		TargetPrHeadCommitSha: params.TargetPRHeadCommitSHA,
-	})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return sqlc.RuntimeEnvironments{}, "", fmt.Errorf("lookup runtime environment: %w", err)
-	}
-
-	if err == nil {
-		switch runtimeEnvironment.Status {
-		case operations.RuntimeStatusPreparing:
-			return runtimeEnvironment, operations.OutcomeAlreadyPreparing, nil
-		case operations.RuntimeStatusPrepared:
-			return runtimeEnvironment, operations.OutcomeAlreadyPrepared, nil
-		}
-	}
-
-	runtimeEnvironment, err = q.InsertRuntimeEnvironment(ctx, sqlc.InsertRuntimeEnvironmentParams{
-		RepositoryID:          params.RepositoryID,
-		PullRequestID:         params.PullRequestID,
-		Type:                  params.RuntimeEnvironmentType,
-		Status:                operations.RuntimeStatusPreparing,
-		TargetPrHeadCommitSha: params.TargetPRHeadCommitSHA,
-	})
-	if err != nil {
-		return sqlc.RuntimeEnvironments{}, "", fmt.Errorf("insert runtime environment: %w", err)
-	}
-
-	return runtimeEnvironment, operations.OutcomeNewAttemptCreated, nil
 }
 
 func strPtr(value string) *string {

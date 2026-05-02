@@ -1,0 +1,26 @@
+meta {
+  name: List Runtime Environments By Repository
+  type: http
+  seq: 18
+}
+
+get {
+  url: {{baseUrl}}/api/runtime-environments?repository_id={{repositoryId}}
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{operatorToken}}
+}
+
+tests {
+  test("list runtime environments by repository returns 200", function() {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.runtime_environments).to.be.an("array");
+    for (const item of body.runtime_environments) {
+      expect(item.runtime_environment.repository_id).to.equal(Number(bru.getEnvVar("repositoryId")));
+    }
+  });
+}

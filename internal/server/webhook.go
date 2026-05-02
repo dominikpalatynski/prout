@@ -292,10 +292,14 @@ func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery 
 		}
 
 		pullRequestRecord, err := q.UpsertPullRequestAnchor(ctx, sqlc.UpsertPullRequestAnchorParams{
-			RepositoryID:         repositoryRecord.ID,
-			PRNumber:             int64(event.PRNumber),
-			GithubPullRequestID:  githubPullRequestIDParam(event.GithubPullRequestID),
-			CurrentHeadCommitSha: event.PRHeadSHA,
+			RepositoryID:                    repositoryRecord.ID,
+			PRNumber:                        int64(event.PRNumber),
+			GithubPullRequestID:             githubPullRequestIDParam(event.GithubPullRequestID),
+			CurrentHeadCommitSha:            event.PRHeadSHA,
+			CurrentSourceGithubRepositoryID: event.PRSourceRepository.GithubRepositoryID,
+			CurrentSourceOwner:              event.PRSourceRepository.Owner,
+			CurrentSourceName:               event.PRSourceRepository.Name,
+			CurrentSourceFullName:           event.PRSourceRepository.FullName,
 		})
 		if err != nil {
 			return markFailed(&repositoryID, fmt.Errorf("upsert pull request anchor: %w", err))
@@ -331,12 +335,17 @@ func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery 
 			if err != nil {
 				return markFailed(&repositoryID, fmt.Errorf("resolve runtime environment type for operation %q: %w", evaluation.OperationIntent.OperationType, err))
 			}
+			initialStep, err := operations.InitialStepForOperation(evaluation.OperationIntent.OperationType)
+			if err != nil {
+				return markFailed(&repositoryID, fmt.Errorf("resolve initial step for operation %q: %w", evaluation.OperationIntent.OperationType, err))
+			}
 
 			intentSnapshotJSON, err := operations.BuildTriggerSnapshot(operations.TriggerSnapshotInput{
 				RepositoryID:           repositoryRecord.ID,
 				PullRequestID:          pullRequestRecord.ID,
 				PRNumber:               pullRequestRecord.PRNumber,
 				GithubPullRequestID:    pullRequestRecord.GithubPullRequestID,
+				PRSourceRepository:     event.PRSourceRepository,
 				DeliveryID:             delivery.DeliveryID,
 				Event:                  event,
 				TriggerID:              triggerRecord.ID,
@@ -356,11 +365,16 @@ func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery 
 				RepositoryID:                    repositoryRecord.ID,
 				RepositoryTriggerID:             &triggerRecord.ID,
 				PullRequestID:                   pullRequestRecord.ID,
+				RuntimeEnvironmentID:            nil,
+				TargetRuntimeEnvironmentID:      nil,
 				OperationType:                   evaluation.OperationIntent.OperationType,
 				Source:                          operations.SourceTrigger,
 				Status:                          operations.StatusQueued,
 				TargetPrHeadCommitSha:           event.PRHeadSHA,
 				IntentSnapshotJson:              intentSnapshotJSON,
+				CurrentStep:                     initialStep.Name,
+				CurrentStepState:                initialStep.State,
+				CurrentStepDetailsJson:          nil,
 			})
 			if err != nil {
 				return markFailed(&repositoryID, fmt.Errorf("insert operation request: %w", err))
@@ -390,7 +404,7 @@ func (s *Server) processSupportedVerifiedDelivery(ctx context.Context, delivery 
 }
 
 func (s *Server) resolvePullRequestTarget(ctx context.Context, repository sqlc.Repositories, event webhook.NormalizedEvent) (webhook.NormalizedEvent, error) {
-	if strings.TrimSpace(event.PRHeadSHA) != "" {
+	if strings.TrimSpace(event.PRHeadSHA) != "" && event.PRSourceRepository.IsComplete() {
 		return event, nil
 	}
 	if s.githubResolver == nil {
@@ -407,6 +421,9 @@ func (s *Server) resolvePullRequestTarget(ctx context.Context, repository sqlc.R
 	}
 	if strings.TrimSpace(event.PRHeadSHA) == "" {
 		event.PRHeadSHA = pullRequest.HeadSHA
+	}
+	if !event.PRSourceRepository.IsComplete() {
+		event.PRSourceRepository = pullRequest.SourceRepository
 	}
 	return event, nil
 }

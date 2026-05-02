@@ -12,6 +12,17 @@ func (c *Config) Validate() error {
 	if c.Server.Bind == "" {
 		errs = append(errs, "server.bind is required")
 	}
+	switch strings.ToLower(c.Storage.Backend) {
+	case "", "filesystem":
+	default:
+		errs = append(errs, fmt.Sprintf("storage.backend: unknown value %q", c.Storage.Backend))
+	}
+	if strings.EqualFold(c.Storage.Backend, "filesystem") && strings.TrimSpace(c.Storage.Filesystem.WorkspaceRoot) == "" {
+		errs = append(errs, "storage.filesystem.workspace_root is required (or set TOOLSHED_STORAGE_FILESYSTEM_WORKSPACE_ROOT)")
+	}
+	if c.Jobs.OperationRequestTimeout <= 0 {
+		errs = append(errs, "jobs.operation_request_timeout must be greater than 0")
+	}
 	if c.DB.DSN == "" {
 		errs = append(errs, "db.dsn is required (or set TOOLSHED_DB_DSN)")
 	}
@@ -26,6 +37,9 @@ func (c *Config) Validate() error {
 	}
 	if c.GitHub.APIBaseURL == "" {
 		errs = append(errs, "github.api_base_url is required")
+	}
+	if c.GitHub.APITimeout <= 0 {
+		errs = append(errs, "github.api_timeout must be greater than 0")
 	}
 	if c.Operator.BearerToken == "" {
 		errs = append(errs, "operator.bearer_token is required (or set TOOLSHED_OPERATOR_BEARER_TOKEN)")

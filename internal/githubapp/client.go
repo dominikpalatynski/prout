@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/dominikpalatynski/toolshed/internal/config"
+	"github.com/dominikpalatynski/toolshed/internal/pullrequests"
 )
 
 type Repository struct {
@@ -38,11 +39,16 @@ type PullRequest struct {
 	GithubPullRequestID int64
 	Number              int
 	HeadSHA             string
+	SourceRepository    pullrequests.SourceRepository
 }
 
 type Resolver interface {
 	ResolveRepository(ctx context.Context, fullName string) (Repository, error)
 	ResolvePullRequest(ctx context.Context, owner, name string, installationID int64, number int) (PullRequest, error)
+}
+
+type TarballDownloader interface {
+	DownloadTarball(ctx context.Context, owner, name string, installationID int64, sha string) (io.ReadCloser, error)
 }
 
 type APIError struct {
@@ -55,10 +61,11 @@ func (e *APIError) Error() string {
 }
 
 type Client struct {
-	appID      int64
-	baseURL    *url.URL
-	httpClient *http.Client
-	privateKey *rsa.PrivateKey
+	appID            int64
+	baseURL          *url.URL
+	httpClient       *http.Client
+	streamHTTPClient *http.Client
+	privateKey       *rsa.PrivateKey
 }
 
 func New(cfg config.GitHubConfig) (*Client, error) {
@@ -77,13 +84,19 @@ func New(cfg config.GitHubConfig) (*Client, error) {
 		return nil, fmt.Errorf("parse github api base url: %w", err)
 	}
 
+	apiTimeout := cfg.APITimeout
+	if apiTimeout <= 0 {
+		apiTimeout = config.DefaultGitHubAPITimeout
+	}
+
 	return &Client{
 		appID:   cfg.AppID,
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: apiTimeout,
 		},
-		privateKey: privateKey,
+		streamHTTPClient: &http.Client{},
+		privateKey:       privateKey,
 	}, nil
 }
 
@@ -139,6 +152,37 @@ func (c *Client) ResolvePullRequest(ctx context.Context, owner, name string, ins
 	}
 
 	return c.getPullRequest(ctx, installationToken, owner, name, number)
+}
+
+func (c *Client) DownloadTarball(ctx context.Context, owner, name string, installationID int64, sha string) (io.ReadCloser, error) {
+	if strings.TrimSpace(owner) == "" || strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("repository owner and name are required")
+	}
+	if installationID <= 0 {
+		return nil, fmt.Errorf("github installation id must be positive")
+	}
+	if strings.TrimSpace(sha) == "" {
+		return nil, fmt.Errorf("pull request head sha is required")
+	}
+
+	appJWT, err := c.appJWT(time.Now().UTC())
+	if err != nil {
+		return nil, fmt.Errorf("create github app jwt: %w", err)
+	}
+
+	installationToken, err := c.createInstallationToken(ctx, appJWT, installationID)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := c.newRequest(ctx, http.MethodGet, c.endpointURL(
+		fmt.Sprintf("/repos/%s/%s/tarball/%s", url.PathEscape(owner), url.PathEscape(name), url.PathEscape(sha)),
+	), http.NoBody, installationToken)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.doStream(req)
 }
 
 func parsePrivateKey(privateKeyPEM []byte) (*rsa.PrivateKey, error) {
@@ -296,7 +340,15 @@ func (c *Client) getPullRequest(ctx context.Context, installationToken, owner, n
 		ID     int64 `json:"id"`
 		Number int   `json:"number"`
 		Head   struct {
-			SHA string `json:"sha"`
+			SHA  string `json:"sha"`
+			Repo struct {
+				ID       int64  `json:"id"`
+				Name     string `json:"name"`
+				FullName string `json:"full_name"`
+				Owner    struct {
+					Login string `json:"login"`
+				} `json:"owner"`
+			} `json:"repo"`
 		} `json:"head"`
 	}
 	if err := c.doJSON(req, &response); err != nil {
@@ -311,11 +363,24 @@ func (c *Client) getPullRequest(ctx context.Context, installationToken, owner, n
 	if strings.TrimSpace(response.Head.SHA) == "" {
 		return PullRequest{}, errors.New("github pull request response missing head.sha")
 	}
+	sourceRepository := pullrequests.SourceRepository{
+		GithubRepositoryID: response.Head.Repo.ID,
+		Owner:              strings.TrimSpace(response.Head.Repo.Owner.Login),
+		Name:               strings.TrimSpace(response.Head.Repo.Name),
+		FullName:           strings.TrimSpace(response.Head.Repo.FullName),
+	}
+	if sourceRepository.FullName == "" && sourceRepository.Owner != "" && sourceRepository.Name != "" {
+		sourceRepository.FullName = sourceRepository.Owner + "/" + sourceRepository.Name
+	}
+	if !sourceRepository.IsComplete() {
+		return PullRequest{}, errors.New("github pull request response missing head.repo")
+	}
 
 	return PullRequest{
 		GithubPullRequestID: response.ID,
 		Number:              response.Number,
 		HeadSHA:             strings.TrimSpace(response.Head.SHA),
+		SourceRepository:    sourceRepository,
 	}, nil
 }
 
@@ -353,6 +418,32 @@ func (c *Client) doJSON(req *http.Request, dst any) error {
 		return fmt.Errorf("decode github response: %w", err)
 	}
 	return nil
+}
+
+func (c *Client) doStream(req *http.Request) (io.ReadCloser, error) {
+	httpClient := c.streamHTTPClient
+	if httpClient == nil {
+		httpClient = c.httpClient
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("github request failed: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if readErr != nil {
+			return nil, fmt.Errorf("read github error response: %w", readErr)
+		}
+		return nil, &APIError{
+			StatusCode: resp.StatusCode,
+			Message:    strings.TrimSpace(string(body)),
+		}
+	}
+
+	return resp.Body, nil
 }
 
 func (c *Client) endpointURL(relativePath string) string {

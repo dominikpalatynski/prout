@@ -32,7 +32,7 @@ func TestParseDeliveryPullRequestOpened(t *testing.T) {
 			"action":"opened",
 			"number":42,
 			"repository":{"id":123456},
-			"pull_request":{"id":987654,"head":{"sha":"abc123"}}
+			"pull_request":{"id":987654,"head":{"sha":"abc123","repo":{"id":654321,"name":"demo","full_name":"acme/demo","owner":{"login":"acme"}}}}
 		}`),
 	)
 	if err != nil {
@@ -53,6 +53,9 @@ func TestParseDeliveryPullRequestOpened(t *testing.T) {
 	}
 	if delivery.Event.PRHeadSHA != "abc123" {
 		t.Fatalf("ParseDelivery() PRHeadSHA = %q, want %q", delivery.Event.PRHeadSHA, "abc123")
+	}
+	if delivery.Event.PRSourceRepository.FullName != "acme/demo" {
+		t.Fatalf("ParseDelivery() PRSourceRepository.FullName = %q, want %q", delivery.Event.PRSourceRepository.FullName, "acme/demo")
 	}
 }
 

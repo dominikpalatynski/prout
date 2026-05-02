@@ -3,13 +3,21 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/caarlos0/env/v11"
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	DefaultGitHubAPITimeout           = 10 * time.Second
+	DefaultOperationRequestJobTimeout = 10 * time.Minute
+)
+
 type Config struct {
 	Server   ServerConfig   `yaml:"server"`
+	Storage  StorageConfig  `yaml:"storage"`
+	Jobs     JobsConfig     `yaml:"jobs"`
 	DB       DBConfig       `yaml:"db"`
 	Log      LogConfig      `yaml:"log"`
 	GitHub   GitHubConfig   `yaml:"github"`
@@ -18,6 +26,19 @@ type Config struct {
 
 type ServerConfig struct {
 	Bind string `yaml:"bind" env:"TOOLSHED_BIND"`
+}
+
+type StorageConfig struct {
+	Backend    string                  `yaml:"backend" env:"TOOLSHED_STORAGE_BACKEND"`
+	Filesystem FilesystemStorageConfig `yaml:"filesystem"`
+}
+
+type FilesystemStorageConfig struct {
+	WorkspaceRoot string `yaml:"workspace_root" env:"TOOLSHED_STORAGE_FILESYSTEM_WORKSPACE_ROOT"`
+}
+
+type JobsConfig struct {
+	OperationRequestTimeout time.Duration `yaml:"operation_request_timeout" env:"TOOLSHED_JOBS_OPERATION_REQUEST_TIMEOUT"`
 }
 
 type DBConfig struct {
@@ -31,10 +52,11 @@ type LogConfig struct {
 }
 
 type GitHubConfig struct {
-	AppID          int64  `yaml:"app_id" env:"TOOLSHED_GITHUB_APP_ID"`
-	PrivateKeyPath string `yaml:"private_key_path" env:"TOOLSHED_GITHUB_PRIVATE_KEY_PATH"`
-	WebhookSecret  string `yaml:"webhook_secret" env:"TOOLSHED_GITHUB_WEBHOOK_SECRET"`
-	APIBaseURL     string `yaml:"api_base_url" env:"TOOLSHED_GITHUB_API_BASE_URL"`
+	AppID          int64         `yaml:"app_id" env:"TOOLSHED_GITHUB_APP_ID"`
+	PrivateKeyPath string        `yaml:"private_key_path" env:"TOOLSHED_GITHUB_PRIVATE_KEY_PATH"`
+	WebhookSecret  string        `yaml:"webhook_secret" env:"TOOLSHED_GITHUB_WEBHOOK_SECRET"`
+	APIBaseURL     string        `yaml:"api_base_url" env:"TOOLSHED_GITHUB_API_BASE_URL"`
+	APITimeout     time.Duration `yaml:"api_timeout" env:"TOOLSHED_GITHUB_API_TIMEOUT"`
 }
 
 type OperatorConfig struct {

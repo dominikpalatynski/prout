@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/dominikpalatynski/toolshed/internal/pullrequests"
 )
 
 const (
@@ -29,16 +31,17 @@ type Delivery struct {
 }
 
 type NormalizedEvent struct {
-	Type                string `json:"type"`
-	GithubRepositoryID  int64  `json:"github_repository_id"`
-	PRNumber            int    `json:"pr_number"`
-	GithubPullRequestID int64  `json:"github_pull_request_id,omitempty"`
-	PRHeadSHA           string `json:"pr_head_sha,omitempty"`
-	Label               string `json:"label,omitempty"`
-	CommentID           int64  `json:"comment_id,omitempty"`
-	CommentBody         string `json:"comment_body,omitempty"`
-	CommentFirstLine    string `json:"comment_first_line,omitempty"`
-	CommentAuthorLogin  string `json:"comment_author_login,omitempty"`
+	Type                string                        `json:"type"`
+	GithubRepositoryID  int64                         `json:"github_repository_id"`
+	PRNumber            int                           `json:"pr_number"`
+	GithubPullRequestID int64                         `json:"github_pull_request_id,omitempty"`
+	PRHeadSHA           string                        `json:"pr_head_sha,omitempty"`
+	PRSourceRepository  pullrequests.SourceRepository `json:"pr_source_repository,omitempty"`
+	Label               string                        `json:"label,omitempty"`
+	CommentID           int64                         `json:"comment_id,omitempty"`
+	CommentBody         string                        `json:"comment_body,omitempty"`
+	CommentFirstLine    string                        `json:"comment_first_line,omitempty"`
+	CommentAuthorLogin  string                        `json:"comment_author_login,omitempty"`
 }
 
 func VerifySignature(secret, signatureHeader string, body []byte) error {
@@ -144,7 +147,15 @@ type githubPayload struct {
 		ID     int64 `json:"id"`
 		Number int   `json:"number"`
 		Head   struct {
-			SHA string `json:"sha"`
+			SHA  string `json:"sha"`
+			Repo struct {
+				ID       int64  `json:"id"`
+				Name     string `json:"name"`
+				FullName string `json:"full_name"`
+				Owner    struct {
+					Login string `json:"login"`
+				} `json:"owner"`
+			} `json:"repo"`
 		} `json:"head"`
 	} `json:"pull_request"`
 	Label struct {
@@ -199,6 +210,9 @@ func normalizePullRequestEvent(payload githubPayload, eventType string, requireL
 		GithubPullRequestID: payload.PullRequest.ID,
 		PRHeadSHA:           headSHA,
 	}
+	if sourceRepository := normalizeSourceRepository(payload.PullRequest.Head.Repo); sourceRepository.IsComplete() {
+		event.PRSourceRepository = sourceRepository
+	}
 
 	if requireLabel {
 		label := strings.TrimSpace(payload.Label.Name)
@@ -209,6 +223,28 @@ func normalizePullRequestEvent(payload githubPayload, eventType string, requireL
 	}
 
 	return event, nil
+}
+
+func normalizeSourceRepository(repo struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	FullName string `json:"full_name"`
+	Owner    struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+}) pullrequests.SourceRepository {
+	fullName := strings.TrimSpace(repo.FullName)
+	owner := strings.TrimSpace(repo.Owner.Login)
+	name := strings.TrimSpace(repo.Name)
+	if fullName == "" && owner != "" && name != "" {
+		fullName = owner + "/" + name
+	}
+	return pullrequests.SourceRepository{
+		GithubRepositoryID: repo.ID,
+		Owner:              owner,
+		Name:               name,
+		FullName:           fullName,
+	}
 }
 
 func normalizeIssueCommentEvent(payload githubPayload) (NormalizedEvent, error) {
