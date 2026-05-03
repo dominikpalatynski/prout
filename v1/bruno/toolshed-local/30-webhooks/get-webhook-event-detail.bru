@@ -1,0 +1,26 @@
+meta {
+  name: Get Webhook Event Detail
+  type: http
+  seq: 16
+}
+
+get {
+  url: {{baseUrl}}/api/webhook-events/{{webhookEventId}}
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{operatorToken}}
+}
+
+tests {
+  test("get webhook event detail returns 200", function() {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.webhook_event.id).to.equal(Number(bru.getEnvVar("webhookEventId")));
+    if (Array.isArray(body.operation_requests) && body.operation_requests.length > 0) {
+      bru.setEnvVar("operationRequestId", String(body.operation_requests[0].id));
+    }
+  });
+}

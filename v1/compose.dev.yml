@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: toolshed
+      POSTGRES_PASSWORD: toolshed
+      POSTGRES_DB: toolshed
+    ports: ["5433:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "toolshed"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  # Uncomment from week 4 onward (ADR-005 testing path).
+  # docker-socket-proxy:
+  #   image: tecnativa/docker-socket-proxy:0.3
+  #   environment:
+  #     CONTAINERS: 1
+  #     NETWORKS: 1
+  #     IMAGES: 1
+  #     VOLUMES: 1
+  #     EXEC: 1
+  #     BUILD: 1
+  #     EVENTS: 1
+  #   volumes: ["/var/run/docker.sock:/var/run/docker.sock:ro"]
+  #   ports: ["2375:2375"]   # ONLY for local dev — never expose in prod
+
+volumes:
+  pgdata: {}

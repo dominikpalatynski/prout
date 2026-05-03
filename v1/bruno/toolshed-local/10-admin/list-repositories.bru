@@ -1,0 +1,35 @@
+meta {
+  name: List Repositories
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/repositories
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{operatorToken}}
+}
+
+vars:pre-request {
+  baseUrl: http://localhost:8080
+  operatorToken: U5cC1PhGSuD230l0vsEyBib0ztH40iSqO1OUTfDYCaU=
+}
+
+script:post-response {
+  const body = res.getBody();
+  if (res.getStatus() === 200 && body.repositories && body.repositories.length > 0) {
+    const repository = body.repositories[0];
+    bru.setEnvVar("repositoryId", repository.id, { persist: true });
+  }
+}
+
+tests {
+  test("list repositories returns 200", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().repositories).to.be.an("array");
+  });
+}

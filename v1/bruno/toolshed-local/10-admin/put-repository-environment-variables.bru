@@ -1,0 +1,49 @@
+meta {
+  name: Put Repository Environment Variables
+  type: http
+  seq: 21
+}
+
+put {
+  url: {{baseUrl}}/api/repositories/{{repositoryId}}/environment-variables
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{operatorToken}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "environment_variables": [
+      {
+        "name": "{{repositoryEnvironmentVariable1Name}}",
+        "value": "{{repositoryEnvironmentVariable1Value}}"
+      },
+      {
+        "name": "{{repositoryEnvironmentVariable2Name}}",
+        "value": "{{repositoryEnvironmentVariable2Value}}"
+      }
+    ]
+  }
+}
+
+script:post-response {
+  const body = res.getBody();
+  if (res.getStatus() === 200 && Array.isArray(body.environment_variables)) {
+    bru.setEnvVar("repositoryEnvironmentVariableCount", body.environment_variables.length, { persist: true });
+  }
+}
+
+tests {
+  test("put repository environment variables returns 200", function() {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.environment_variables).to.be.an("array");
+    expect(body.environment_variables.length).to.equal(2);
+    expect(body.environment_variables[0].name).to.equal(bru.getEnvVar("repositoryEnvironmentVariable1Name"));
+    expect(body.environment_variables[1].name).to.equal(bru.getEnvVar("repositoryEnvironmentVariable2Name"));
+  });
+}

@@ -1,0 +1,30 @@
+meta {
+  name: Patch Repository Enabled
+  type: http
+  seq: 6
+}
+
+patch {
+  url: {{baseUrl}}/api/repositories/{{repositoryId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{operatorToken}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "enabled": {{repositoryEnabled}}
+  }
+}
+
+tests {
+  test("patch repository returns 200", function() {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.repository.id).to.equal(Number(bru.getEnvVar("repositoryId")));
+  });
+}

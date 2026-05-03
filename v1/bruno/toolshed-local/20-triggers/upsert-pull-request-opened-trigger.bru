@@ -1,0 +1,37 @@
+meta {
+  name: Upsert Pull Request Opened Trigger
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/api/repositories/{{repositoryId}}/triggers
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{operatorToken}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "type": "preview_on_pull_request_opened"
+  }
+}
+
+script:post-response {
+  const body = res.getBody();
+  if (res.getStatus() === 200 && body.trigger) {
+    bru.setEnvVar("repositoryTriggerId", body.trigger.id, { persist: true });
+  }
+}
+
+tests {
+  test("upsert preview_on_pull_request_opened trigger returns 200", function() {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.trigger.type).to.equal("preview_on_pull_request_opened");
+  });
+}

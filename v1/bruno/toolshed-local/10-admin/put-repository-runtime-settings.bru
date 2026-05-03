@@ -1,0 +1,41 @@
+meta {
+  name: Put Repository Runtime Settings
+  type: http
+  seq: 19
+}
+
+put {
+  url: {{baseUrl}}/api/repositories/{{repositoryId}}/runtime-settings
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{operatorToken}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "compose_file_path": "{{composeFilePath}}",
+    "exposed_service_name": "{{exposedServiceName}}",
+    "exposed_service_port": {{exposedServicePort}}
+  }
+}
+
+script:post-response {
+  const body = res.getBody();
+  if (res.getStatus() === 200 && body.runtime_settings) {
+    bru.setEnvVar("runtimeSettingsComplete", body.runtime_settings.complete, { persist: true });
+  }
+}
+
+tests {
+  test("put repository runtime settings returns 200", function() {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.runtime_settings.compose_file_path).to.equal(bru.getEnvVar("composeFilePath"));
+    expect(body.runtime_settings.exposed_service_name).to.equal(bru.getEnvVar("exposedServiceName"));
+    expect(body.runtime_settings.exposed_service_port).to.equal(Number(bru.getEnvVar("exposedServicePort")));
+  });
+}

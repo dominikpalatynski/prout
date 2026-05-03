@@ -1,0 +1,36 @@
+# /etc/toolshed/server.yml — operator-edited at install time
+server:
+  bind: ":8080"
+
+storage:
+  backend: filesystem
+  filesystem:
+    workspace_root: /var/lib/toolshed/workspaces
+
+jobs:
+  operation_request_timeout: 30m
+
+runtime:
+  ingress_network: toolshed-traefik
+  docker_compose:
+    default_service_cpus: 1
+    default_service_memory: 512m
+    default_service_pids: 256
+
+db:
+  dsn: "postgres://toolshed:toolshed@localhost:5433/toolshed?sslmode=disable"
+
+log:
+  level: info
+  format: json
+  add_source: false
+
+github:
+  app_id: 123456
+  private_key_path: /etc/toolshed/github-app.pem
+  webhook_secret: replace-me
+  api_base_url: https://api.github.com
+  api_timeout: 10s
+
+operator:
+  bearer_token: replace-me

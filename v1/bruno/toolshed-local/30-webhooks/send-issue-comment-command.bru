@@ -1,0 +1,77 @@
+meta {
+  name: Send Issue Comment Command
+  type: http
+  seq: 14
+}
+
+post {
+  url: {{baseUrl}}/webhooks/github
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  X-GitHub-Event: issue_comment
+}
+
+body:json {
+  {}
+}
+
+script:pre-request {
+  const payload = {
+    action: "created",
+    repository: {
+      id: Number(bru.getEnvVar("githubRepositoryId"))
+    },
+    issue: {
+      number: Number(bru.getEnvVar("pullRequestNumber")),
+      pull_request: {
+        url: `https://api.github.com/repos/${bru.getEnvVar("repositoryFullName")}/pulls/${bru.getEnvVar("pullRequestNumber")}`
+      }
+    },
+    comment: {
+      id: Number(bru.getEnvVar("commentId")),
+      body: String(bru.getEnvVar("commentBody")),
+      user: {
+        login: String(bru.getEnvVar("commentAuthorLogin"))
+      }
+    }
+  };
+
+  const body = JSON.stringify(payload);
+  const deliveryId = `${bru.getEnvVar("webhookDeliveryPrefix") || "local-phase-2"}-${Date.now()}`;
+
+  req.setBody(payload);
+  req.setHeader("X-GitHub-Delivery", deliveryId);
+  bru.setVar("lastWebhookDeliveryId", deliveryId);
+
+  let signature = String(bru.getEnvVar("webhookSignature") || "").trim();
+  if (!signature) {
+    if (bru.isSafeMode()) {
+      throw new Error("Set webhookSignature in the Bruno environment or switch this collection to Developer Mode to auto-sign webhook requests.");
+    }
+    const crypto = require("crypto");
+    const secret = String(bru.getEnvVar("webhookSecret") || "");
+    if (!secret) {
+      throw new Error("webhookSecret is required");
+    }
+    signature = crypto.createHmac("sha256", secret).update(body).digest("hex");
+  }
+
+  req.setHeader("X-Hub-Signature-256", `sha256=${signature}`);
+}
+
+script:post-response {
+  const body = res.getBody();
+  if (body && body.webhook_event_id) {
+    bru.setEnvVar("webhookEventId", body.webhook_event_id, { persist: true });
+  }
+}
+
+tests {
+  test("issue_comment.created webhook is accepted", function() {
+    expect([200, 202]).to.include(res.getStatus());
+  });
+}
