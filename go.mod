@@ -3,6 +3,7 @@ module github.com/dominikpalatynski/toolshed
 go 1.24.4
 
 require (
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/spf13/cobra v1.10.2
 	go.yaml.in/yaml/v3 v3.0.4
 )
