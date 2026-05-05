@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -24,6 +25,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dominikpalatynski/toolshed/internal/config"
@@ -33,11 +35,13 @@ import (
 const (
 	composeUpCommandKey   = "compose_up_command"
 	composeDownCommandKey = "compose_down_command"
+	dockerOutputTailLimit = 120
 )
 
 type composeDocument struct {
 	Services map[string]map[string]any `yaml:"services"`
 	Networks map[string]map[string]any `yaml:"networks,omitempty"`
+	Volumes  map[string]map[string]any `yaml:"volumes,omitempty"`
 	Extras   map[string]any            `yaml:",inline"`
 }
 
@@ -53,6 +57,13 @@ type APIError struct {
 	URL        string
 	StatusCode int
 	Message    string
+}
+
+type commandExecutionError struct {
+	command       string
+	workspacePath string
+	tail          string
+	err           error
 }
 
 type WorkspaceLocationBuilder struct {
@@ -82,6 +93,24 @@ func (e *APIError) Error() string {
 		return fmt.Sprintf("%s with status %d", request, e.StatusCode)
 	}
 	return fmt.Sprintf("%s with status %d: %s", request, e.StatusCode, e.Message)
+}
+
+func (e *commandExecutionError) Error() string {
+	if strings.TrimSpace(e.tail) == "" {
+		return fmt.Sprintf("run %s in %s: %v", e.command, e.workspacePath, e.err)
+	}
+
+	return fmt.Sprintf(
+		"run %s in %s: %v\nlast command output:\n%s",
+		e.command,
+		e.workspacePath,
+		e.err,
+		e.tail,
+	)
+}
+
+func (e *commandExecutionError) Unwrap() error {
+	return e.err
 }
 
 func NewWorkspaceHandler(cfg *config.Config) (*WorkspaceHandler, error) {
@@ -158,7 +187,7 @@ func (w *WorkspaceHandler) HandleCreateWorkspace(location WorkspaceLocationBuild
 		return err
 	}
 	w.SendPRComment(location, "🚀 Workspace files prepared, starting Docker containers...")
-	if err := w.runDockerCommand(workspacePath, composeUpCommandKey); err != nil {
+	if err := w.runDockerCommand(location, workspacePath, composeUpCommandKey); err != nil {
 		w.SendPRComment(location, "❌ Failed to create workspace: error running docker command")
 		return err
 	}
@@ -173,7 +202,7 @@ func (w *WorkspaceHandler) HandleDeleteWorkspace(locationBuilder WorkspaceLocati
 
 	slog.Info("Deleting workspace", "location", location)
 	slog.Info("Running docker compose down to stop workspace containers", "location", location)
-	if err := w.runDockerCommand(location, composeDownCommandKey); err != nil {
+	if err := w.runDockerCommand(locationBuilder, location, composeDownCommandKey); err != nil {
 		return fmt.Errorf("run docker compose down: %w", err)
 	}
 
@@ -542,26 +571,175 @@ func parsePrivateKey(privateKeyPEM []byte) (*rsa.PrivateKey, error) {
 	return rsaKey, nil
 }
 
-func (w *WorkspaceHandler) runDockerCommand(workspacePath, composeCommandKey string) error {
+func dockerComposeProjectName(locationBuilder WorkspaceLocationBuilder) (string, error) {
+	fullName := strings.TrimSpace(strings.ToLower(locationBuilder.FullName))
+	if fullName == "" {
+		return "", fmt.Errorf("workspace location full name is required")
+	}
 
-	var cmd *exec.Cmd
+	sha := strings.TrimSpace(strings.ToLower(locationBuilder.SHA))
+	if sha == "" {
+		return "", fmt.Errorf("workspace location sha is required")
+	}
+
+	rawName := fmt.Sprintf("%s-%d-%s", fullName, locationBuilder.PRNumber, sha)
+	var builder strings.Builder
+	builder.Grow(len(rawName))
+	for _, r := range rawName {
+		switch {
+		case r >= 'a' && r <= 'z':
+			builder.WriteRune(r)
+		case r >= '0' && r <= '9':
+			builder.WriteRune(r)
+		case r == '-' || r == '_':
+			builder.WriteRune(r)
+		default:
+			builder.WriteByte('-')
+		}
+	}
+
+	projectName := strings.Trim(builder.String(), "-_")
+	if projectName == "" {
+		return "", fmt.Errorf("workspace docker compose project name is empty after sanitization")
+	}
+
+	first := projectName[0]
+	if (first < 'a' || first > 'z') && (first < '0' || first > '9') {
+		projectName = "ws-" + strings.TrimLeft(projectName, "-_")
+	}
+
+	return projectName, nil
+}
+
+func (w *WorkspaceHandler) runDockerCommand(locationBuilder WorkspaceLocationBuilder, workspacePath, composeCommandKey string) error {
+	projectName, err := dockerComposeProjectName(locationBuilder)
+	if err != nil {
+		return fmt.Errorf("build docker compose project name: %w", err)
+	}
+
+	args := []string{"compose", "-f", w.cfg.GitHub.Repository.BuildSettings.DockerComposeFilePath, "-p", projectName}
 	switch composeCommandKey {
 	case composeUpCommandKey:
-		cmd = exec.Command("docker", "compose", "-f", "compose.yml", "up", "-d")
+		args = append(args, "up", "-d")
 	case composeDownCommandKey:
-		cmd = exec.Command("docker", "compose", "-f", "compose.yml", "down")
+		args = append(args, "down")
 	default:
 		return fmt.Errorf("unknown compose command key: %s", composeCommandKey)
 	}
 
+	cmd := exec.Command("docker", args...)
 	cmd.Dir = workspacePath
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), "BUILDKIT_PROGRESS=plain")
 
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("run docker compose in %s: %w", workspacePath, err)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("create docker compose stdout pipe: %w", err)
 	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("create docker compose stderr pipe: %w", err)
+	}
+
+	command := strings.Join(cmd.Args, " ")
+	logAttrs := []any{
+		"workspace", workspacePath,
+		"compose_file", w.cfg.GitHub.Repository.BuildSettings.DockerComposeFilePath,
+		"project_name", projectName,
+		"command", command,
+	}
+
+	slog.Info("Running docker compose command", logAttrs...)
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start docker compose in %s: %w", workspacePath, err)
+	}
+
+	outputTail := newCommandOutputTail(dockerOutputTailLimit)
+	stdoutErrCh := make(chan error, 1)
+	stderrErrCh := make(chan error, 1)
+	stdoutAttrs := append(append([]any{}, logAttrs...), "stream", "stdout")
+	stderrAttrs := append(append([]any{}, logAttrs...), "stream", "stderr")
+
+	go func() {
+		stdoutErrCh <- streamCommandOutput(stdout, outputTail, stdoutAttrs)
+	}()
+	go func() {
+		stderrErrCh <- streamCommandOutput(stderr, outputTail, stderrAttrs)
+	}()
+
+	waitErr := cmd.Wait()
+	stdoutErr := <-stdoutErrCh
+	stderrErr := <-stderrErrCh
+
+	if stdoutErr != nil {
+		return fmt.Errorf("read docker compose stdout: %w", stdoutErr)
+	}
+	if stderrErr != nil {
+		return fmt.Errorf("read docker compose stderr: %w", stderrErr)
+	}
+
+	if waitErr != nil {
+		tail := outputTail.String()
+		errAttrs := append([]any{}, logAttrs...)
+		errAttrs = append(errAttrs, "error", waitErr)
+		if tail != "" {
+			errAttrs = append(errAttrs, "tail", tail)
+		}
+		slog.Error("Docker compose command failed", errAttrs...)
+		return &commandExecutionError{
+			command:       command,
+			workspacePath: workspacePath,
+			tail:          tail,
+			err:           waitErr,
+		}
+	}
+
+	slog.Info("Docker compose command completed", logAttrs...)
 	return nil
+}
+
+type commandOutputTail struct {
+	mu    sync.Mutex
+	limit int
+	lines []string
+}
+
+func newCommandOutputTail(limit int) *commandOutputTail {
+	return &commandOutputTail{limit: limit}
+}
+
+func (b *commandOutputTail) Add(line string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.lines = append(b.lines, line)
+	if len(b.lines) > b.limit {
+		b.lines = append([]string(nil), b.lines[len(b.lines)-b.limit:]...)
+	}
+}
+
+func (b *commandOutputTail) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return strings.Join(b.lines, "\n")
+}
+
+func streamCommandOutput(r io.Reader, outputTail *commandOutputTail, attrs []any) error {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		outputTail.Add(line)
+
+		lineAttrs := append([]any{}, attrs...)
+		lineAttrs = append(lineAttrs, "line", line)
+		slog.Info("Docker compose output", lineAttrs...)
+	}
+
+	return scanner.Err()
 }
 
 func (w *WorkspaceHandler) prepareComposeFile(workspacePath, domain string) error {
@@ -604,9 +782,9 @@ func (w *WorkspaceHandler) prepareComposeFile(workspacePath, domain string) erro
 	}
 	document.Networks["proxy"] = map[string]any{"external": true}
 
-	delete(service, "ports")
 	attachProxyNetwork(service)
 	mergeTraefikLabels(service, exposedServiceName, domain, w.cfg.Environment.Name, exposedPort)
+	removeComposeConflicts(&document)
 	loadEnvironmentVariables(service, w.cfg.GitHub.Repository.BuildSettings.EnvironmentVariables)
 
 	output, err := yaml.Marshal(document)
@@ -749,6 +927,8 @@ func mergeTraefikLabels(service map[string]any, serviceName, domain, environment
 }
 
 func generateTraefikLabels(serviceName, domain, environment string, port int) []string {
+	traefikName := traefikResourceName(serviceName, domain)
+
 	var webEntrypoint string
 	if environment == config.ProdEnvironment {
 		webEntrypoint = "websecure"
@@ -758,15 +938,61 @@ func generateTraefikLabels(serviceName, domain, environment string, port int) []
 
 	additions := []string{
 		"traefik.enable=true",
-		fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s`)", serviceName, domain),
-		fmt.Sprintf("traefik.http.routers.%s.entrypoints=%s", serviceName, webEntrypoint),
-		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", serviceName, port),
+		"traefik.docker.network=proxy",
+		fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s`)", traefikName, domain),
+		fmt.Sprintf("traefik.http.routers.%s.entrypoints=%s", traefikName, webEntrypoint),
+		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", traefikName, port),
 	}
 
 	if environment == config.ProdEnvironment {
-		additions = append(additions, "traefik.http.routers.my-app.tls=true")
+		additions = append(additions, fmt.Sprintf("traefik.http.routers.%s.tls=true", traefikName))
 	}
 	return additions
+}
+
+func traefikResourceName(serviceName, domain string) string {
+	rawName := strings.TrimSpace(strings.ToLower(serviceName + "-" + domain))
+	if rawName == "" {
+		return "app"
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(rawName))
+	lastWasDash := false
+	for _, r := range rawName {
+		switch {
+		case r >= 'a' && r <= 'z':
+			builder.WriteRune(r)
+			lastWasDash = false
+		case r >= '0' && r <= '9':
+			builder.WriteRune(r)
+			lastWasDash = false
+		case r == '-' || r == '_' || r == '.':
+			if lastWasDash {
+				continue
+			}
+			builder.WriteByte('-')
+			lastWasDash = true
+		default:
+			if lastWasDash {
+				continue
+			}
+			builder.WriteByte('-')
+			lastWasDash = true
+		}
+	}
+
+	sanitized := strings.Trim(builder.String(), "-")
+	if sanitized == "" {
+		return "app"
+	}
+
+	first := sanitized[0]
+	if first >= '0' && first <= '9' {
+		return "app-" + sanitized
+	}
+
+	return sanitized
 }
 
 func appendLabelList(existing []any, additions []string) []any {
@@ -809,4 +1035,43 @@ func (w *WorkspaceHandler) prepareDomainName(locationBuilder WorkspaceLocationBu
 	}
 
 	return fmt.Sprintf("%s-%s-%s%s", sanitizedFullName, sanitizedPRNumber, sanitizedSHA, domain), nil
+}
+
+func removeNamedNetworks(compose *composeDocument) {
+	if compose.Networks == nil {
+		return
+	}
+
+	for _, network := range compose.Networks {
+		if network == nil {
+			continue
+		}
+		delete(network, "name")
+	}
+}
+
+func removeNamedVolumes(compose *composeDocument) {
+	if compose.Volumes == nil {
+		return
+	}
+
+	for _, volume := range compose.Volumes {
+		if volume == nil {
+			continue
+		}
+		delete(volume, "name")
+	}
+}
+
+func removeComposeConflicts(compose *composeDocument) {
+	removeNamedNetworks(compose)
+	removeNamedVolumes(compose)
+
+	for _, service := range compose.Services {
+		if service == nil {
+			continue
+		}
+		delete(service, "container_name")
+		delete(service, "ports")
+	}
 }
