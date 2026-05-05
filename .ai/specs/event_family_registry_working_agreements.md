@@ -1,6 +1,6 @@
 # Event Family Registry: Working Agreements
 
-This document captures the working agreements for implementing the automation registry in Toolshed.
+This document captures the working agreements for implementing the automation registry in prout.
 It does not replace the PRD or the ADR. Its purpose is to explain the model, the responsibilities, and how to read the DSL.
 
 Related documents:

@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-Toolshed has internal operator-facing audit capabilities such as **Operation Request History**, but it does not yet have one centralized way to publish standardized feedback back into the GitHub conversation thread of a **Pull Request**.
+prout has internal operator-facing audit capabilities such as **Operation Request History**, but it does not yet have one centralized way to publish standardized feedback back into the GitHub conversation thread of a **Pull Request**.
 
 Without a dedicated module, each future caller would need to decide on its own how to choose a reusable markdown template, how to render that template safely, how to gather the GitHub target fields needed for publication, and how to call the GitHub App API. That would spread formatting rules, validation behavior, and transport details across the codebase. It would also make it harder to keep **Pull Request Conversation Comments** consistent when different **Operation Types** later need to report outcomes back to GitHub.
 
@@ -20,7 +20,7 @@ This feature targets GitHub conversation feedback only. It does not redefine or 
 
 ## User Stories
 
-1. As an Operator, I want Toolshed to publish a **Pull Request Conversation Comment** through one centralized interface, so that GitHub feedback stays consistent across features.
+1. As an Operator, I want prout to publish a **Pull Request Conversation Comment** through one centralized interface, so that GitHub feedback stays consistent across features.
 2. As an Operator, I want the comment-publishing capability to live in `githubapp`, so that GitHub transport behavior is not duplicated in worker or API code.
 3. As an Operator, I want the publisher to target the main conversation thread of a **Pull Request**, so that the feedback appears in the expected GitHub location instead of becoming an inline diff review comment.
 4. As an Operator, I want the first version to add a new comment each time, so that the behavior is simple and predictable.
@@ -29,7 +29,7 @@ This feature targets GitHub conversation feedback only. It does not redefine or 
 7. As an Operator, I want all supported comment templates to be registered in one place, so that the system has a clear source of truth for reusable GitHub feedback.
 8. As an Operator, I want comment templates to be written as markdown, so that published comments are readable and GitHub-native.
 9. As an Operator, I want comment templates to use placeholders, so that the same template can render different **Pull Request** outcomes without manual string concatenation at each call site.
-10. As an Operator, I want template rendering to fail before any network request if required data is missing, so that Toolshed never publishes a broken partial comment.
+10. As an Operator, I want template rendering to fail before any network request if required data is missing, so that prout never publishes a broken partial comment.
 11. As an Operator, I want an unknown `TemplateKey` to fail immediately, so that misconfigured callers do not post unintended content.
 12. As an Operator, I want the publisher to return an error rather than log internally, so that the caller can log one contextualized failure record with the right request and repository identifiers.
 13. As an Operator, I want comment publication to use a dedicated **Pull Request** target object, so that callers do not pass storage models or unrelated fields into the GitHub adapter.
@@ -92,7 +92,7 @@ This feature targets GitHub conversation feedback only. It does not redefine or 
 ## Out of Scope
 
 - Editing, replacing, or deleting previously published **Pull Request Conversation Comments**.
-- Searching GitHub for an earlier Toolshed comment.
+- Searching GitHub for an earlier prout comment.
 - Persisting GitHub comment identifiers or comment URLs.
 - Returning published comment metadata from `PublishComment`.
 - Inline review comments on a diff instead of main-thread **Pull Request Conversation Comments**.
@@ -104,7 +104,7 @@ This feature targets GitHub conversation feedback only. It does not redefine or 
 
 ## Further Notes
 
-- This design deliberately separates internal audit language from external GitHub feedback. **Operation Request History** remains the durable operator-visible record inside Toolshed, while **Pull Request Conversation Comments** remain GitHub-facing messages posted back to one **Pull Request**.
+- This design deliberately separates internal audit language from external GitHub feedback. **Operation Request History** remains the durable operator-visible record inside prout, while **Pull Request Conversation Comments** remain GitHub-facing messages posted back to one **Pull Request**.
 - The first version is intentionally narrow. Its goal is not to solve the full lifecycle of bot-authored comments, but to create one dependable central publishing seam that future features can reuse.
 - The decision to keep rendering data caller-owned is meant to preserve package boundaries: domain orchestration belongs to the caller, while `githubapp` owns template lookup, render validation, and GitHub publication.
 - If a future use case requires comment replacement, deduplication, or operator-visible comment tracking, that should be handled in a separate follow-up design rather than complicating the first add-only interface.

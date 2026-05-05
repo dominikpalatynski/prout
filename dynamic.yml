@@ -1,15 +1,15 @@
 http:
   routers:
-    toolshed:
+    prout:
       rule: "Host(`dashboard.qa.palatynkicloud.com`)"
       entryPoints:
         - websecure
       tls: {}
 
-      service: toolshed-service
+      service: prout-service
 
   services:
-    toolshed-service:
+    prout-service:
       loadBalancer:
         servers:
           - url: "http://host.docker.internal:8090"

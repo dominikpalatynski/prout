@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-As the Operator, I can currently see a GitHub Delivery enter Toolshed, become a Webhook Event, match Triggers, and hand off generic asynchronous work. What I still cannot see is the first durable runtime-domain slice of preview work. There is no stable Pull Request anchor, no durable queued Operation Request, no per-attempt Preview Environment record, and no shared language for whether preview work created a new attempt, reused an existing one, or was replaced by a newer target.
+As the Operator, I can currently see a GitHub Delivery enter prout, become a Webhook Event, match Triggers, and hand off generic asynchronous work. What I still cannot see is the first durable runtime-domain slice of preview work. There is no stable Pull Request anchor, no durable queued Operation Request, no per-attempt Preview Environment record, and no shared language for whether preview work created a new attempt, reused an existing one, or was replaced by a newer target.
 
 Without that slice, later work such as tarball retrieval, workspace materialization, Docker runtime deployment, cleanup, and GitHub feedback would be built on top of an ambiguous model. Phase 3A needs to introduce the durable runtime-domain model first, while keeping execution scope narrow enough that the phase ends with a clear, testable boundary.
 
@@ -10,13 +10,13 @@ Without that slice, later work such as tarball retrieval, workspace materializat
 
 As the Operator, I will gain a first-class runtime-domain model for preview work.
 
-When a matched Trigger requests preview work, Toolshed will create a durable Operation Request with an immutable snapshot of the target Pull Request Head Commit and the intended Operation Type. A worker will handle that Operation Request and either create or reuse the correct Preview Environment attempt for that target. The resulting Operation Outcome will be persisted durably, and the Preview Environment will end Phase 3A in `preparing`.
+When a matched Trigger requests preview work, prout will create a durable Operation Request with an immutable snapshot of the target Pull Request Head Commit and the intended Operation Type. A worker will handle that Operation Request and either create or reuse the correct Preview Environment attempt for that target. The resulting Operation Outcome will be persisted durably, and the Preview Environment will end Phase 3A in `preparing`.
 
 Phase 3A intentionally stops there. It does not yet download code or produce a materialized workspace on disk. Instead, it establishes the Pull Request anchor, Operation Request model, Preview Environment attempt model, runtime status model, and audit/read-path behavior that later phases can extend safely.
 
 ## User Stories
 
-1. As the Operator, I want Toolshed to create a stable Pull Request record for a registered Repository, so that runtime work has a durable domain anchor beyond raw webhook payloads.
+1. As the Operator, I want prout to create a stable Pull Request record for a registered Repository, so that runtime work has a durable domain anchor beyond raw webhook payloads.
 2. As the Operator, I want the Pull Request record to retain the current Pull Request Head Commit, so that runtime work can target an exact commit deterministically.
 3. As the Operator, I want matched Triggers to create durable Operation Requests, so that queued runtime work is visible in the product model rather than hidden only inside River.
 4. As the Operator, I want each matched Trigger to create its own Operation Request, so that audit history preserves which Trigger asked for runtime work.
@@ -44,8 +44,8 @@ Phase 3A intentionally stops there. It does not yet download code or produce a m
 26. As the Operator, I want the webhook request-path transaction to persist Webhook Event interpretation, Pull Request anchor updates, Operation Request creation, and River enqueue together, so that accepted work is never half-written.
 27. As the Operator, I want the Webhook Event detail view to include Operation Requests and linked runtime-attempt context, so that I can inspect one delivery end to end without needing the panel.
 28. As the Operator, I want Phase 3A to stop with Preview Environments in `preparing`, so that runtime-domain modeling is completed before real tarball and workspace behavior starts.
-29. As the future maintainer of Toolshed, I want the runtime-domain vocabulary to be stable before tarball retrieval and Docker runtime logic are added, so that later phases deepen the pipeline instead of renaming it.
-30. As the future maintainer of Toolshed, I want Operation Types such as `preview-restart`, `preview-delete`, and `preview-cleanup-superseded` to be modeled now but not necessarily executable yet, so that later slices can plug into a consistent runtime-domain model.
+29. As the future maintainer of prout, I want the runtime-domain vocabulary to be stable before tarball retrieval and Docker runtime logic are added, so that later phases deepen the pipeline instead of renaming it.
+30. As the future maintainer of prout, I want Operation Types such as `preview-restart`, `preview-delete`, and `preview-cleanup-superseded` to be modeled now but not necessarily executable yet, so that later slices can plug into a consistent runtime-domain model.
 
 ## Implementation Decisions
 
@@ -71,7 +71,7 @@ Phase 3A intentionally stops there. It does not yet download code or produce a m
 - Phase 3A ends with Preview Environments in `preparing`; it does not simulate `prepared`.
 - Operation Outcome is persisted on the handled Operation Request, with an optional reference to the Runtime Environment it created or reused.
 - The first Operation Outcomes should distinguish at least “new attempt created”, “already preparing”, “already prepared”, and “operation failed”.
-- Pull Requests become a first-class table in this phase, anchored by Toolshed’s internal identifier while also retaining GitHub’s pull-request identifier.
+- Pull Requests become a first-class table in this phase, anchored by prout’s internal identifier while also retaining GitHub’s pull-request identifier.
 - Pull Request identity should use a stable per-repository anchor based on Repository plus pull-request number, with a separate immutable GitHub identifier retained for external reference.
 - The first Pull Request slice must at minimum track the current Pull Request Head Commit; richer Pull Request state is not required to unlock Phase 3A acceptance.
 - Preview Environment replacement by a newer target is modeled as `superseded`, not `failed`.

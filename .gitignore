@@ -34,5 +34,5 @@
 # Local
 server.yml
 .private-keys/
-.toolshed/
+.prout/
 .cache/

@@ -1,4 +1,4 @@
-# Toolshed Implementation Phases
+# prout Implementation Phases
 
 This document translates the accepted architecture decisions from `adr_tech.md` into high-level implementation phases.
 

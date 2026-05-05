@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-As the Operator, I need Phase 2 to replace the current mock webhook slice with a real GitHub ingress path that I can inspect end-to-end. Right now the system proves only that a GitHub-shaped HTTP request can enqueue a probe job and write `_ping`. That is enough for the walking skeleton, but it does not show how Toolshed will behave once real signed GitHub Deliveries start arriving.
+As the Operator, I need Phase 2 to replace the current mock webhook slice with a real GitHub ingress path that I can inspect end-to-end. Right now the system proves only that a GitHub-shaped HTTP request can enqueue a probe job and write `_ping`. That is enough for the walking skeleton, but it does not show how prout will behave once real signed GitHub Deliveries start arriving.
 
 I specifically want to focus this phase on GitHub integration and event handling. I need to see how a verified GitHub Delivery becomes a persisted Webhook Event, how a Repository and its Triggers are looked up, how Trigger Types are evaluated, and how matched work is handed off asynchronously. Without that slice, later phases would add tarball retrieval, runtime deployment, panel work, and GitHub feedback on top of an ingress path that still hides the real system boundaries.
 
@@ -24,27 +24,27 @@ Repositories will be registered explicitly through an operator API protected by 
 
 ## User Stories
 
-1. As the Operator, I want real GitHub webhook signature verification, so that Toolshed only accepts trusted GitHub Deliveries into its inbox.
-2. As the Operator, I want Phase 2 to persist verified GitHub Deliveries as immutable Webhook Events, so that I can inspect exactly what Toolshed accepted.
+1. As the Operator, I want real GitHub webhook signature verification, so that prout only accepts trusted GitHub Deliveries into its inbox.
+2. As the Operator, I want Phase 2 to persist verified GitHub Deliveries as immutable Webhook Events, so that I can inspect exactly what prout accepted.
 3. As the Operator, I want delivery deduplication by GitHub delivery identifier, so that the same GitHub Delivery is accepted once even if GitHub retries it.
 4. As the Operator, I want duplicate deliveries to return success semantics to GitHub without duplicating downstream work, so that idempotency does not look like an error to the sender.
 5. As the Operator, I want invalid-signature deliveries rejected before persistence, so that the inbox remains a record of trusted GitHub input rather than mixed trusted and untrusted traffic.
 6. As the Operator, I want unsupported but verified event types recorded and marked as ignored, so that the inbox remains a truthful record of what GitHub actually sent.
 7. As the Operator, I want the system to classify event type before touching Repository state, so that unsupported deliveries do not cause unnecessary Repository lookups.
 8. As the Operator, I want a narrow initial event subscription surface, so that Phase 2 focuses on the most useful pull request interactions without flooding the inbox.
-9. As the Operator, I want `pull_request.opened` handled, so that Toolshed can observe the beginning of a pull request lifecycle.
+9. As the Operator, I want `pull_request.opened` handled, so that prout can observe the beginning of a pull request lifecycle.
 10. As the Operator, I want `pull_request.labeled` handled, so that label-based Trigger evaluation becomes visible.
 11. As the Operator, I want `issue_comment.created` on pull requests handled, so that comment-driven Trigger evaluation becomes visible.
-12. As the Operator, I want pull request conversation comments treated separately from inline review comments, so that Toolshed starts from a clean and unambiguous comment model.
+12. As the Operator, I want pull request conversation comments treated separately from inline review comments, so that prout starts from a clean and unambiguous comment model.
 13. As the Operator, I want supported events for an unregistered Repository to be persisted and marked ignored, so that I can see the event without accidentally creating unmanaged Repository records.
 14. As the Operator, I want supported events for a disabled Repository to be persisted and marked ignored, so that I have a Repository-wide kill switch without deleting configuration.
-15. As the Operator, I want Repositories to be registered explicitly through Toolshed, so that a Repository is a managed unit of automation rather than a side effect of the first webhook.
+15. As the Operator, I want Repositories to be registered explicitly through prout, so that a Repository is a managed unit of automation rather than a side effect of the first webhook.
 16. As the Operator, I want Repository lookup keyed by GitHub repository ID, so that webhook handling is stable even if repository names change.
 17. As the Operator, I want Repository registration to resolve GitHub repository metadata from `owner/name`, so that I do not need to manually enter GitHub numeric identifiers.
-18. As the Operator, I want Toolshed to persist the GitHub installation identifier for each Repository, so that later GitHub API calls know which installation auth context to use.
+18. As the Operator, I want prout to persist the GitHub installation identifier for each Repository, so that later GitHub API calls know which installation auth context to use.
 19. As the Operator, I want Repository registration to be an upsert, so that repeated registration calls safely refresh metadata instead of creating duplicates.
 20. As the Operator, I want Trigger Types to be global system capabilities, so that all Repositories draw from one built-in catalog of supported Trigger behavior.
-21. As the Operator, I want Trigger instances to remain repository-specific rules, so that each Repository controls when Toolshed starts work.
+21. As the Operator, I want Trigger instances to remain repository-specific rules, so that each Repository controls when prout starts work.
 22. As the Operator, I want Trigger configuration stored in the database before the panel exists, so that Phase 2 uses real Repository Configuration rather than temporary hardcoded rules.
 23. As the Operator, I want each Trigger to belong to exactly one event family, so that matching logic stays simple and predictable.
 24. As the Operator, I want a Repository-level `enabled` flag, so that I can suspend all automation for one Repository without deleting its configuration.
@@ -55,7 +55,7 @@ Repositories will be registered explicitly through an operator API protected by 
 29. As the Operator, I want comment command Trigger configuration to define how a pull request conversation comment is interpreted, so that comment matching can evolve without changing the storage model.
 30. As the Operator, I want comment command matching to start with a strict exact-first-line strategy, so that comment triggers remain explicit and predictable in Phase 2.
 31. As the Operator, I want comment command matching to be case-sensitive, so that command semantics are deterministic rather than fuzzy.
-32. As the Operator, I want Toolshed to build in-memory normalized event types after inbox persistence, so that downstream matching logic works on stable local types rather than raw GitHub payload shape.
+32. As the Operator, I want prout to build in-memory normalized event types after inbox persistence, so that downstream matching logic works on stable local types rather than raw GitHub payload shape.
 33. As the Operator, I want Trigger evaluation to happen synchronously inside webhook processing, so that the request path fully explains how a supported delivery was interpreted.
 34. As the Operator, I want every supported event to evaluate all configured matching Triggers in its Repository, so that repository-specific rules behave independently rather than first-match-wins.
 35. As the Operator, I want Trigger evaluations persisted even when no Trigger matches, so that I can see why a supported event produced no downstream action.
@@ -73,7 +73,7 @@ Repositories will be registered explicitly through an operator API protected by 
 47. As the Operator, I want an operator API for Repository registration and Trigger management before the panel exists, so that I can exercise the real configuration model during Phase 2.
 48. As the Operator, I want the operator API protected by a bearer token from Server Configuration, so that this temporary management surface is simple but not anonymous.
 49. As the future panel, I want a machine-readable Trigger Type catalog from the backend, so that the UI can build configuration forms from backend metadata instead of hardcoding every Trigger Type.
-50. As the future maintainer of Toolshed, I want Phase 2 to clearly separate GitHub Delivery intake, Trigger evaluation, and Trigger Dispatch, so that later phases can add preview-specific behavior without unpicking the event pipeline.
+50. As the future maintainer of prout, I want Phase 2 to clearly separate GitHub Delivery intake, Trigger evaluation, and Trigger Dispatch, so that later phases can add preview-specific behavior without unpicking the event pipeline.
 
 ## Implementation Decisions
 
@@ -87,7 +87,7 @@ Repositories will be registered explicitly through an operator API protected by 
 - Supported event processing checks event type first, and only then looks up the Repository. This avoids unnecessary Repository queries for unsupported deliveries.
 - The initial GitHub event scope is intentionally small: `pull_request.opened`, `pull_request.labeled`, and `issue_comment.created` only for pull request conversation comments in the main thread.
 - Review comments, review threads, review submissions, issue comments on plain issues, and installation lifecycle events are deferred.
-- `Repository` is canonically identified inside Toolshed by `github_repository_id`. `owner/name` is stored as metadata and can be refreshed.
+- `Repository` is canonically identified inside prout by `github_repository_id`. `owner/name` is stored as metadata and can be refreshed.
 - `github_installation_id` is stored on the Repository as the auth context needed for later installation-token GitHub API calls. It is not the identity of the Repository itself.
 - Repository registration is explicit and happens through an operator API rather than implicitly from webhook traffic.
 - Repository registration accepts `owner/name`, resolves GitHub metadata through GitHub App credentials, and stores `github_repository_id` plus `github_installation_id`.
@@ -127,7 +127,7 @@ Repositories will be registered explicitly through an operator API protected by 
 - The operator API includes Repository registration and listing, Trigger creation/upsert and listing, and patch endpoints for toggling `enabled` state on both Repositories and Triggers.
 - Trigger updates through `PATCH` are restricted to operational toggles such as `enabled`. Changing Trigger semantics means posting a new upsert rather than mutating the existing Trigger in place.
 - Trigger deletion is out of scope for Phase 2. Disabling a Trigger replaces hard deletion for this phase.
-- The operator API uses internal Toolshed Repository identifiers in resource paths rather than `owner/name`.
+- The operator API uses internal prout Repository identifiers in resource paths rather than `owner/name`.
 - The backend exposes a `GET /api/trigger-types` style catalog endpoint so future clients can discover global Trigger Types and their configuration contract.
 - The Trigger Type catalog returns a simple backend-defined schema description rather than full JSON Schema. At minimum it describes the Trigger Type, event family, and required configuration fields.
 - The read API exposes Webhook Events with filtering by Repository, status, event type, delivery ID, and limit.
@@ -158,7 +158,7 @@ Repositories will be registered explicitly through an operator API protected by 
 - Database-backed behavior, especially idempotency and transactional handoff, is a good candidate for integration tests against real PostgreSQL rather than mocked stores.
 - Prior art already exists for DB-backed test setup in the repository’s test database helper, which shows the codebase already anticipates real Postgres integration-style tests.
 - Existing Phase 1 smoke behavior provides a useful baseline for request-path verification, but Phase 2 should move critical event-handling behavior into automated tests rather than leaving it entirely to manual curl verification.
-- River itself does not need bespoke re-testing; the tests should verify Toolshed’s use of River through persisted application state and job-handled outcomes.
+- River itself does not need bespoke re-testing; the tests should verify prout’s use of River through persisted application state and job-handled outcomes.
 
 ## Out of Scope
 

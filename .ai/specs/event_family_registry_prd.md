@@ -2,17 +2,17 @@
 
 ## Problem Statement
 
-As the maintainer of Toolshed, I can already see the system accept a GitHub Delivery, normalize supported webhook input, evaluate repository-specific Triggers, create durable Operation Requests, and execute preview-related runtime work.
+As the maintainer of prout, I can already see the system accept a GitHub Delivery, normalize supported webhook input, evaluate repository-specific Triggers, create durable Operation Requests, and execute preview-related runtime work.
 
 What I cannot do cleanly is extend this automation model without reopening multiple parts of the codebase at once. Today, supported webhook event routing, Trigger matching, Trigger-to-Operation mapping, and operation execution entry points are spread across separate switches and separate modules. Repository-specific Trigger records also carry technical metadata derived from built-in behavior, which creates two sources of truth and makes the model feel more configurable than it really is. Adding a new capability such as a new label-driven action or a new comment-driven action risks touching parsing, matching, persistence, and execution in several different places.
 
 The current operator API in `internal/server/api.go` exposes `GET /api/trigger-types`, `GET /api/repositories/{repositoryID}/triggers`, `POST /api/repositories/{repositoryID}/triggers`, and `PATCH /api/repositories/{repositoryID}/triggers/{triggerID}`. That lets an Operator manage repository-specific Triggers, and `PATCH /api/repositories/{repositoryID}` can disable an entire Repository, but there is no repository-level API surface for one supported Event Family. I cannot disable pull-request comments for one Repository while leaving the Repository itself and its other Event Families enabled.
 
-I need Toolshed's built-in automation model to become declarative, explicit, and easy to extend in one known place, while preserving the existing domain language around Trigger, Trigger Type, Event Family, Operation Type, Operation Handler, Operation Request, and Runtime Environment.
+I need prout's built-in automation model to become declarative, explicit, and easy to extend in one known place, while preserving the existing domain language around Trigger, Trigger Type, Event Family, Operation Type, Operation Handler, Operation Request, and Runtime Environment.
 
 ## Solution
 
-As the maintainer of Toolshed, I will gain one central Event Family registry that acts as the local source of truth for built-in automation behavior.
+As the maintainer of prout, I will gain one central Event Family registry that acts as the local source of truth for built-in automation behavior.
 
 Each Event Family will define the supported GitHub webhook classification, validate and normalize incoming webhook payloads into the shared event model, and declare the Trigger Types that can match that family. Each Trigger Type will be business-named, will represent a closed built-in preset with no per-Repository matcher config, and will map to exactly one Operation Type. Each Operation Type will be declared once and will expose one explicit Operation Handler as the known execution entry point for worker-side execution.
 
@@ -22,45 +22,45 @@ This keeps the model declarative without overcomplicating it. The system will st
 
 ## User Stories
 
-1. As the maintainer of Toolshed, I want one central Event Family registry, so that I can extend built-in automation in one known place.
-2. As the maintainer of Toolshed, I want Event Families to own webhook routing and normalization, so that supported GitHub input is not spread across multiple switches.
-3. As the maintainer of Toolshed, I want Trigger Types to be business-named presets, so that the intent of each built-in rule is obvious from its name.
-4. As the maintainer of Toolshed, I want Trigger Types to be closed presets without per-Repository matcher config, so that the built-in automation model stays explicit and auditable.
-5. As the maintainer of Toolshed, I want Trigger Types to hang from Event Family definitions, so that supported triggers are grouped by the webhook family that can produce them.
-6. As the maintainer of Toolshed, I want each Trigger Type to point to exactly one Operation Type, so that matching semantics and execution intent stay tied together.
-7. As the maintainer of Toolshed, I want each Operation Type to be declared once, so that execution semantics are not duplicated under multiple Trigger Types.
-8. As the maintainer of Toolshed, I want each Operation Type to have one explicit Operation Handler, so that the worker has one known execution entry point without switch-based dispatch.
-9. As the maintainer of Toolshed, I want Operation Handlers to be obvious named units, so that humans can quickly find where one operation is executed.
-10. As the maintainer of Toolshed, I want the worker to resolve Operation Handlers from the registry, so that adding a new Operation Type does not require editing a central switch.
+1. As the maintainer of prout, I want one central Event Family registry, so that I can extend built-in automation in one known place.
+2. As the maintainer of prout, I want Event Families to own webhook routing and normalization, so that supported GitHub input is not spread across multiple switches.
+3. As the maintainer of prout, I want Trigger Types to be business-named presets, so that the intent of each built-in rule is obvious from its name.
+4. As the maintainer of prout, I want Trigger Types to be closed presets without per-Repository matcher config, so that the built-in automation model stays explicit and auditable.
+5. As the maintainer of prout, I want Trigger Types to hang from Event Family definitions, so that supported triggers are grouped by the webhook family that can produce them.
+6. As the maintainer of prout, I want each Trigger Type to point to exactly one Operation Type, so that matching semantics and execution intent stay tied together.
+7. As the maintainer of prout, I want each Operation Type to be declared once, so that execution semantics are not duplicated under multiple Trigger Types.
+8. As the maintainer of prout, I want each Operation Type to have one explicit Operation Handler, so that the worker has one known execution entry point without switch-based dispatch.
+9. As the maintainer of prout, I want Operation Handlers to be obvious named units, so that humans can quickly find where one operation is executed.
+10. As the maintainer of prout, I want the worker to resolve Operation Handlers from the registry, so that adding a new Operation Type does not require editing a central switch.
 11. As the Operator, I want a Repository-specific Trigger to mean only “this Trigger Type is enabled for this Repository,” so that Repository Configuration stays simple.
 12. As the Operator, I want a Repository to have at most one Trigger of a given Trigger Type, so that enablement stays unambiguous.
-13. As the maintainer of Toolshed, I want redundant trigger metadata removed from Repository-specific Trigger records, so that the database does not duplicate built-in definitions from code.
-14. As the maintainer of Toolshed, I want the API for Repository Triggers to expose business-named Trigger Types, so that operators see the same concepts that the code uses.
-15. As the maintainer of Toolshed, I want Repository Trigger creation to stop implying arbitrary matcher configuration, so that users are not misled into thinking built-in presets are ad hoc configurable.
-16. As the maintainer of Toolshed, I want existing preview-related behavior to survive the refactor, so that the architecture becomes cleaner without changing preview semantics accidentally.
-17. As the maintainer of Toolshed, I want multiple Trigger Types such as label-based and comment-based preview entry points to reuse the same Operation Type, so that idempotency and concurrency stay owned by the execution model.
-18. As the maintainer of Toolshed, I want Operation Type semantics such as runtime target, step machine, and replacement policy to stay declared once, so that I do not have to synchronize multiple copies of the same logic.
-19. As the maintainer of Toolshed, I want the shared normalized event shape to remain simple, so that the registry refactor does not introduce unnecessary payload-type complexity.
-20. As the maintainer of Toolshed, I want unsupported Event Families, Trigger Types, and Operation Types to fail clearly, so that declarative extension remains safe.
-21. As the maintainer of Toolshed, I want the registry definitions to read like data plus small named functions, so that the code stays easy to understand and modify.
-22. As the maintainer of Toolshed, I want new built-in capabilities such as delete, restart, or deploy flows to be added by extending the registry, so that the system scales without architectural drift.
-23. As the maintainer of Toolshed, I want migration of existing Trigger rows to be deterministic, so that legacy preview trigger rows can move to the new business-named Trigger Types safely.
+13. As the maintainer of prout, I want redundant trigger metadata removed from Repository-specific Trigger records, so that the database does not duplicate built-in definitions from code.
+14. As the maintainer of prout, I want the API for Repository Triggers to expose business-named Trigger Types, so that operators see the same concepts that the code uses.
+15. As the maintainer of prout, I want Repository Trigger creation to stop implying arbitrary matcher configuration, so that users are not misled into thinking built-in presets are ad hoc configurable.
+16. As the maintainer of prout, I want existing preview-related behavior to survive the refactor, so that the architecture becomes cleaner without changing preview semantics accidentally.
+17. As the maintainer of prout, I want multiple Trigger Types such as label-based and comment-based preview entry points to reuse the same Operation Type, so that idempotency and concurrency stay owned by the execution model.
+18. As the maintainer of prout, I want Operation Type semantics such as runtime target, step machine, and replacement policy to stay declared once, so that I do not have to synchronize multiple copies of the same logic.
+19. As the maintainer of prout, I want the shared normalized event shape to remain simple, so that the registry refactor does not introduce unnecessary payload-type complexity.
+20. As the maintainer of prout, I want unsupported Event Families, Trigger Types, and Operation Types to fail clearly, so that declarative extension remains safe.
+21. As the maintainer of prout, I want the registry definitions to read like data plus small named functions, so that the code stays easy to understand and modify.
+22. As the maintainer of prout, I want new built-in capabilities such as delete, restart, or deploy flows to be added by extending the registry, so that the system scales without architectural drift.
+23. As the maintainer of prout, I want migration of existing Trigger rows to be deterministic, so that legacy preview trigger rows can move to the new business-named Trigger Types safely.
 24. As the Operator, I want later Repository Trigger changes to affect future Webhook Events without restart, so that Repository Configuration remains live.
-25. As the maintainer of Toolshed, I want the architecture to make the entry point for automation execution obvious to both humans and AI assistants, so that future work stays readable and controlled.
+25. As the maintainer of prout, I want the architecture to make the entry point for automation execution obvious to both humans and AI assistants, so that future work stays readable and controlled.
 26. As the Operator, I want a Repository Event Family to mean only “this Event Family is enabled for this Repository,” so that I can gate whole webhook families separately from individual Trigger Types.
 27. As the Operator, I want the API to list supported Event Families, so that I can manage repository-level Event Family enablement through stable built-in names.
 28. As the Operator, I want repository-level Event Families to be enabled or disabled through dedicated endpoints, so that I do not have to mutate Trigger rows just to stop one webhook family for one Repository.
-29. As the maintainer of Toolshed, I want the webhook pipeline to consult repository-level Event Family enablement before per-Trigger evaluation, so that family-scoped repository policy is enforced in one obvious place.
-30. As the maintainer of Toolshed, I want the current Trigger endpoints documented as a migration baseline, so that the refactor explains exactly what API surface is being replaced or reshaped.
-31. As the maintainer of Toolshed, I want Event Family management endpoints and Trigger management endpoints to stay separate, so that the API mirrors the domain model instead of collapsing two decisions into one resource.
+29. As the maintainer of prout, I want the webhook pipeline to consult repository-level Event Family enablement before per-Trigger evaluation, so that family-scoped repository policy is enforced in one obvious place.
+30. As the maintainer of prout, I want the current Trigger endpoints documented as a migration baseline, so that the refactor explains exactly what API surface is being replaced or reshaped.
+31. As the maintainer of prout, I want Event Family management endpoints and Trigger management endpoints to stay separate, so that the API mirrors the domain model instead of collapsing two decisions into one resource.
 32. As the Operator, I want disabling one Repository Event Family to stop matching all Trigger Types in that family without erasing their own enabled state, so that I can pause one webhook family and later resume it without rebuilding trigger configuration.
-33. As the maintainer of Toolshed, I want every newly registered Repository to receive all supported Repository Event Families as enabled by default, so that the refactor preserves current live webhook behavior unless an Operator narrows it.
-34. As the maintainer of Toolshed, I want existing Repositories to be backfilled with enabled Repository Event Families during migration, so that rollout does not silently disable current automation.
+33. As the maintainer of prout, I want every newly registered Repository to receive all supported Repository Event Families as enabled by default, so that the refactor preserves current live webhook behavior unless an Operator narrows it.
+34. As the maintainer of prout, I want existing Repositories to be backfilled with enabled Repository Event Families during migration, so that rollout does not silently disable current automation.
 35. As the Operator, I want to configure a Trigger even when its Repository Event Family is currently disabled, so that I can prepare repository-specific presets before reopening that webhook family.
 36. As the Operator, I want a supported webhook blocked by a disabled Repository Event Family to remain visible as an ignored Webhook Event, so that audit, debugging, and deduplication still work.
-37. As the maintainer of Toolshed, I want Repository Event Family disablement to affect only future webhook intake, so that already created Operation Requests and Runtime Environments are not retroactively canceled by a configuration flip.
+37. As the maintainer of prout, I want Repository Event Family disablement to affect only future webhook intake, so that already created Operation Requests and Runtime Environments are not retroactively canceled by a configuration flip.
 38. As the Operator, I want repository-level Event Family endpoints to address resources by stable Event Family key rather than database row ID, so that the API stays readable and declarative.
-39. As the maintainer of Toolshed, I want the Bruno collection under `bruno/toolshed-local` updated alongside the API refactor, so that operator-facing request flows for Event Families and Triggers remain executable and documented.
+39. As the maintainer of prout, I want the Bruno collection under `bruno/prout-local` updated alongside the API refactor, so that operator-facing request flows for Event Families and Triggers remain executable and documented.
 
 ## Implementation Decisions
 
@@ -127,7 +127,7 @@ This keeps the model declarative without overcomplicating it. The system will st
   - the Operation Type definition and handler-dispatch layer
   - the migration/backfill logic for existing Trigger rows
 - Supporting operator artifacts should be updated in the same slice of work:
-  - the Bruno admin collection under `bruno/toolshed-local`
+  - the Bruno admin collection under `bruno/prout-local`
   - request coverage for listing Event Families
   - request coverage for listing repository Event Families
   - request coverage for enabling and disabling repository Event Families by stable key
@@ -162,7 +162,7 @@ This keeps the model declarative without overcomplicating it. The system will st
 
 ## Bruno Collection Surface
 
-- The Bruno collection in `bruno/toolshed-local/10-admin` should be updated in the same change set as the API contract so local operator workflows stay in sync.
+- The Bruno collection in `bruno/prout-local/10-admin` should be updated in the same change set as the API contract so local operator workflows stay in sync.
 - At minimum the collection should gain requests for:
   - listing supported Event Families
   - listing repository Event Families

@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-As the Operator, I need a real walking skeleton for Toolshed before building real GitHub ingress, Preview Environment lifecycle, and deployment runtime behavior. Right now the repository has parts of the scaffold in place, but it does not yet prove the end-to-end Phase 1 promise: start the application, connect to PostgreSQL, validate schema state, accept a GitHub-shaped webhook request, enqueue asynchronous work in River, consume that work in-process, and expose a simple technical way to verify that the pipeline actually ran.
+As the Operator, I need a real walking skeleton for prout before building real GitHub ingress, Preview Environment lifecycle, and deployment runtime behavior. Right now the repository has parts of the scaffold in place, but it does not yet prove the end-to-end Phase 1 promise: start the application, connect to PostgreSQL, validate schema state, accept a GitHub-shaped webhook request, enqueue asynchronous work in River, consume that work in-process, and expose a simple technical way to verify that the pipeline actually ran.
 
 Without this slice, the project remains structurally promising but operationally unproven. That makes later phases riskier because real GitHub integration, deployment orchestration, and panel work would be layered on top of a foundation that has not yet demonstrated the minimal happy path.
 
@@ -14,8 +14,8 @@ The system will expose a GitHub-shaped `POST /webhooks/github` endpoint that sup
 
 ## User Stories
 
-1. As the Operator, I want a minimal working slice of Toolshed, so that later phases build on a proven runtime path instead of assumptions.
-2. As the Operator, I want to start Toolshed with a small Phase 1 configuration surface, so that local setup does not pretend GitHub App, OAuth, ACME, or panel features already exist.
+1. As the Operator, I want a minimal working slice of prout, so that later phases build on a proven runtime path instead of assumptions.
+2. As the Operator, I want to start prout with a small Phase 1 configuration surface, so that local setup does not pretend GitHub App, OAuth, ACME, or panel features already exist.
 3. As the Operator, I want to keep the existing `server.yml` plus env override approach, so that Phase 1 stays consistent with the current repository approach while trimming unused fields.
 4. As the Operator, I want migrations to run through Task-based commands, so that schema changes remain explicit and separate from application startup.
 5. As the Operator, I want the server to fail fast when the database schema is out of date, so that I do not accidentally run the binary against an invalid schema.
@@ -41,7 +41,7 @@ The system will expose a GitHub-shaped `POST /webhooks/github` endpoint that sup
 25. As the Operator, I want the debug endpoint to be explicitly temporary and technical, so that it does not become an accidental long-term product API.
 26. As the Operator, I want River UI to stay out of the Phase 1 acceptance boundary, so that the walking skeleton stays focused on pipeline correctness rather than extra observability surface.
 27. As the Operator, I want to verify Phase 1 manually with curl and a debug readback path, so that I can confirm the runtime slice without adding automated integration tests yet.
-28. As the future maintainer of Toolshed, I want Phase 1 naming and contracts to stay honest about what is mock and what is real, so that Phase 2 can extend the foundation without untangling misleading placeholders.
+28. As the future maintainer of prout, I want Phase 1 naming and contracts to stay honest about what is mock and what is real, so that Phase 2 can extend the foundation without untangling misleading placeholders.
 
 ## Implementation Decisions
 
@@ -102,7 +102,7 @@ The system will expose a GitHub-shaped `POST /webhooks/github` endpoint that sup
 - Panel, OAuth sign-in, and access control.
 - River UI.
 - Automated integration tests for the Phase 1 walking skeleton.
-- A `toolshed migrate` CLI command.
+- A `prout migrate` CLI command.
 - Any operator workflow that depends on panel behavior or public HTTPS exposure.
 
 ## Further Notes

@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-Toolshed already has the right lifecycle anchors for preview work:
+prout already has the right lifecycle anchors for preview work:
 
 - `internal/jobs/preview_start_flow.go` drives `preview-start` through `source_materialization`, `compose_preparation`, and `runtime_deployment`
 - `internal/jobs/preview_cleanup_flow.go` drives teardown and workspace cleanup for superseded attempts

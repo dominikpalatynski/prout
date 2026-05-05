@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-As the Operator, I can already see Toolshed accept a GitHub Delivery, evaluate Triggers, create durable Operation Requests, create or reuse the correct Preview Environment attempt, and materialize an isolated workspace for one exact Pull Request Head Commit.
+As the Operator, I can already see prout accept a GitHub Delivery, evaluate Triggers, create durable Operation Requests, create or reuse the correct Preview Environment attempt, and materialize an isolated workspace for one exact Pull Request Head Commit.
 
 What I still cannot see is the first real runtime-execution slice of preview work. A `prepared` Preview Environment currently means only that a workspace exists. There is no repository-scoped runtime configuration for how a preview should be started, no deployment metadata frozen per Runtime Environment attempt, no Docker Compose preparation pipeline, no Compose sanitization boundary, no structured distinction between retryable infrastructure failures and permanent configuration failures, and no runtime teardown path for superseded attempts that already created Docker resources.
 
@@ -14,7 +14,7 @@ As the Operator, I will gain the first real runtime deployment phase inside `pre
 
 When a matched Trigger requests preview work, the existing Operation Request flow will still create or reuse the correct Preview Environment attempt. For a new or retried attempt, `preview-start` will continue materializing source into a workspace and will then advance through two additional technical steps: deployment preparation and runtime deployment.
 
-Deployment preparation will read repository-scoped runtime settings and repository-scoped environment variables, validate and sanitize the configured Docker Compose input, inject Toolshed-managed metadata, runtime networks, and server-wide resource limits, and freeze that resolved deployment input for exactly one Runtime Environment attempt. That frozen deployment input will be persisted as deployment metadata for the attempt and rendered into backend-specific artifacts inside the workspace through a shared workspace/filesystem abstraction.
+Deployment preparation will read repository-scoped runtime settings and repository-scoped environment variables, validate and sanitize the configured Docker Compose input, inject prout-managed metadata, runtime networks, and server-wide resource limits, and freeze that resolved deployment input for exactly one Runtime Environment attempt. That frozen deployment input will be persisted as deployment metadata for the attempt and rendered into backend-specific artifacts inside the workspace through a shared workspace/filesystem abstraction.
 
 Runtime deployment will then consume that frozen deployment input and start the preview stack through the Docker Compose runtime path. In this phase, `prepared` will continue to be the coarse Runtime Environment Status that signals successful completion of the current phase. After Phase 4, that means runtime startup completed successfully for that attempt.
 
@@ -25,9 +25,9 @@ This phase intentionally stops before public routing, TLS, GitHub PR feedback, a
 ## User Stories
 
 1. As the Operator, I want `preview-start` to remain one business-level Operation Type, so that preview deployment still expresses one stable user intent even as the internal pipeline gains more technical steps.
-2. As the Operator, I want one prepared workspace to become one running preview stack, so that Toolshed moves from source preparation into real runtime execution.
+2. As the Operator, I want one prepared workspace to become one running preview stack, so that prout moves from source preparation into real runtime execution.
 3. As the Operator, I want repository-scoped runtime settings to define where the preview Compose file lives, so that preview deployment does not depend on hardcoded repository conventions.
-4. As the Operator, I want repository-scoped runtime settings to define the exposed service name, so that Toolshed knows which service is intended for routing.
+4. As the Operator, I want repository-scoped runtime settings to define the exposed service name, so that prout knows which service is intended for routing.
 5. As the Operator, I want repository-scoped runtime settings to define the canonical exposed service port, so that routing does not rely on guessing from Compose declarations.
 6. As the Operator, I want repository-scoped environment variables to remain part of Repository Configuration rather than Runtime Environment attempt state, so that later attempts for the same Repository can reuse the same configuration surface.
 7. As the Operator, I want repository-scoped runtime settings to exist by default for each Repository, even when incomplete, so that there is always a stable configuration record to edit.
@@ -44,7 +44,7 @@ This phase intentionally stops before public routing, TLS, GitHub PR feedback, a
 18. As the Operator, I want preview deployment to reject external Docker networks declared by repository Compose input, so that preview stacks cannot attach themselves to arbitrary shared infrastructure.
 19. As the Operator, I want repository-defined internal networks to remain usable when they stay local to the Compose project, so that normal multi-service stack modeling is not unnecessarily broken.
 20. As the Operator, I want each preview attempt to have one private runtime network, so that services from different attempts stay isolated from each other.
-21. As the future maintainer of Toolshed, I want the shared Traefik-facing network model to stay compatible with later phases, so that public routing can be added without redefining deployment semantics.
+21. As the future maintainer of prout, I want the shared Traefik-facing network model to stay compatible with later phases, so that public routing can be added without redefining deployment semantics.
 22. As the Operator, I want host-published ports to be invalid even before public routing is implemented, so that the runtime contract does not drift between phases.
 23. As the Operator, I want the exposed service port for routing to come from repository-scoped runtime settings rather than Compose inference, so that configuration stays explicit and auditable.
 24. As the Operator, I want deployment preparation to accept most safe Compose features while blocking explicitly unsafe or unsupported constructs, so that preview support is broad without giving up safety boundaries.
@@ -52,11 +52,11 @@ This phase intentionally stops before public routing, TLS, GitHub PR feedback, a
 26. As the Operator, I want server-wide CPU, memory, and PID limits injected into every preview stack, so that one runaway preview cannot starve the host.
 27. As the Operator, I do not want per-Repository resource caps in this phase, so that Phase 4 stays aligned with the current Server Configuration model.
 28. As the Operator, I want deployment artifacts such as the rendered Compose file to live inside the workspace of the attempt, so that teardown and diagnosis stay scoped to that attempt.
-29. As the future maintainer of Toolshed, I want all runtime file operations to go through one shared workspace/filesystem abstraction, so that backend-specific code does not scatter raw filesystem access across the codebase.
-30. As the future maintainer of Toolshed, I want the workspace abstraction to expose a narrow path-resolution escape hatch, so that backend tooling can still run external commands without bypassing workspace safety rules.
-31. As the future maintainer of Toolshed, I want the runtime backend interface to align with the technical pipeline, so that orchestration can treat deployment preparation, runtime deployment, and runtime teardown as distinct responsibilities.
-32. As the future maintainer of Toolshed, I want the runtime backend to receive explicit resolved input rather than performing its own database lookups, so that backend implementations remain testable and infrastructure-focused.
-33. As the future maintainer of Toolshed, I want the orchestration layer to remain responsible for persisting deployment metadata and step progress, so that the runtime backend does not take on database responsibilities.
+29. As the future maintainer of prout, I want all runtime file operations to go through one shared workspace/filesystem abstraction, so that backend-specific code does not scatter raw filesystem access across the codebase.
+30. As the future maintainer of prout, I want the workspace abstraction to expose a narrow path-resolution escape hatch, so that backend tooling can still run external commands without bypassing workspace safety rules.
+31. As the future maintainer of prout, I want the runtime backend interface to align with the technical pipeline, so that orchestration can treat deployment preparation, runtime deployment, and runtime teardown as distinct responsibilities.
+32. As the future maintainer of prout, I want the runtime backend to receive explicit resolved input rather than performing its own database lookups, so that backend implementations remain testable and infrastructure-focused.
+33. As the future maintainer of prout, I want the orchestration layer to remain responsible for persisting deployment metadata and step progress, so that the runtime backend does not take on database responsibilities.
 34. As the Operator, I want `preview-start` to keep using the existing high-level Operation Outcomes such as `already_preparing` and `already_prepared`, so that operator-visible semantics stay stable as the pipeline deepens.
 35. As the Operator, I want `already_preparing` to cover all in-flight technical steps of `preview-start`, so that repeated ensure-style requests still report one consistent current attempt.
 36. As the Operator, I want `already_prepared` to mean that the same target attempt has already reached the ready state of the current phase, so that repeated ensure-style requests reuse a good running preview rather than replacing it.
@@ -64,7 +64,7 @@ This phase intentionally stops before public routing, TLS, GitHub PR feedback, a
 38. As the Operator, I want missing deployment artifacts behind a supposedly prepared attempt to trigger creation of a new attempt, so that self-repair still happens at the ensure boundary.
 39. As the Operator, I want deployment preparation failures caused by configuration or sanitization to be treated as permanent failures, so that clearly invalid inputs do not consume queue retries.
 40. As the Operator, I want infrastructure-style deployment failures to remain retryable, so that transient Docker or subprocess outages can recover without manual intervention.
-41. As the future maintainer of Toolshed, I want retry classification to cross the runtime-backend boundary through normal wrapped errors, so that the basic `error` contract stays idiomatic and simple.
+41. As the future maintainer of prout, I want retry classification to cross the runtime-backend boundary through normal wrapped errors, so that the basic `error` contract stays idiomatic and simple.
 42. As the Operator, I want permanent preview deployment failures to finalize immediately on the current queue attempt, so that queue retries are reserved for genuinely retryable conditions.
 43. As the Operator, I want retryable failures to resume from the current technical step of the same Runtime Environment attempt, so that transient issues do not create duplicate attempts.
 44. As the Operator, I want deployment preparation retries to rebuild the frozen deployment input for the same attempt, so that partially written artifacts can be repaired in place.
@@ -73,11 +73,11 @@ This phase intentionally stops before public routing, TLS, GitHub PR feedback, a
 47. As the Operator, I want failed attempts to keep workspace and metadata available for diagnosis even when runtime teardown is attempted, so that failure analysis remains possible.
 48. As the Operator, I want automatic cleanup of superseded attempts to tear down runtime resources before removing the workspace, so that a replaced preview does not leave behind active containers or networks.
 49. As the Operator, I want workspace-only cleanup to remain sufficient when a superseded attempt never reached runtime deployment, so that cleanup work stays proportional to what the attempt actually created.
-50. As the future maintainer of Toolshed, I want `preview-cleanup-superseded` to remain the same cleanup-style Operation Type as deployment work deepens, so that cleanup semantics stay stable instead of multiplying business operations.
-51. As the future maintainer of Toolshed, I want the technical step pipeline to remain small and retry-oriented, so that `current_step` reflects real resume boundaries rather than verbose internal milestones.
-52. As the future maintainer of Toolshed, I want only the first technical step to begin in `pending`, so that later steps do not introduce redundant intermediate states.
-53. As the future maintainer of Toolshed, I want successful step completion to move directly into the next step’s `in_progress` state, so that retries can always resume from the current real boundary.
-54. As the future maintainer of Toolshed, I want the preview worker logic to be split into focused flow modules rather than one growing file, so that source materialization, deployment preparation, runtime deployment, and cleanup stay readable.
+50. As the future maintainer of prout, I want `preview-cleanup-superseded` to remain the same cleanup-style Operation Type as deployment work deepens, so that cleanup semantics stay stable instead of multiplying business operations.
+51. As the future maintainer of prout, I want the technical step pipeline to remain small and retry-oriented, so that `current_step` reflects real resume boundaries rather than verbose internal milestones.
+52. As the future maintainer of prout, I want only the first technical step to begin in `pending`, so that later steps do not introduce redundant intermediate states.
+53. As the future maintainer of prout, I want successful step completion to move directly into the next step’s `in_progress` state, so that retries can always resume from the current real boundary.
+54. As the future maintainer of prout, I want the preview worker logic to be split into focused flow modules rather than one growing file, so that source materialization, deployment preparation, runtime deployment, and cleanup stay readable.
 55. As the Operator, I want Phase 4 to stop before public preview URLs, TLS, and GitHub feedback, so that Docker Compose runtime execution is delivered as a clean vertical slice without coupling to routing and publication concerns.
 
 ## Implementation Decisions

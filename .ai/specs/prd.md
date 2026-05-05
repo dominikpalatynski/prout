@@ -1,4 +1,4 @@
-# 🧰 Toolshed — Product Requirements Document
+# 🧰 prout — Product Requirements Document
 
 **GitHub Automation Bot — Self-Hosted, Personal-Scale**
 _Version 2.0 · MVP Scope · April 2026_
@@ -22,15 +22,15 @@ The result for a solo OSS maintainer: either skip the automation entirely and ab
 
 ## Solution
 
-Toolshed is a self-hosted GitHub automation bot built primarily for the maintainer's own open source projects, with an architectural path to evolve into a more general-purpose tool over time.
+prout is a self-hosted GitHub automation bot built primarily for the maintainer's own open source projects, with an architectural path to evolve into a more general-purpose tool over time.
 
 The MVP scope is narrow and concrete: **orchestrate ephemeral preview environments for pull requests**, triggered by GitHub events (PR open/synchronize/close, labels, comments). This is the first capability — the one with the highest day-to-day impact for OSS review workflows. Future capabilities (label sync, triage automation, agent-driven autofix, release-notes assist) are anticipated but explicitly out of MVP scope.
 
 The product takes design inspiration from Probot (lightweight, GitHub-native bot pattern) and Prow (config-driven behavior with a built-in model for capabilities), positioning itself between them: more opinionated than a framework, lighter than a Kubernetes-scale CI system.
 
-A maintainer installs Toolshed on a single VPS using `docker-compose up`, points a GitHub App at it, and configures registered repositories through a minimal web panel. The first PR opened against a registered repository results in a unique HTTPS URL posted as a PR comment. When the PR closes, the environment is torn down automatically.
+A maintainer installs prout on a single VPS using `docker-compose up`, points a GitHub App at it, and configures registered repositories through a minimal web panel. The first PR opened against a registered repository results in a unique HTTPS URL posted as a PR comment. When the PR closes, the environment is torn down automatically.
 
-Toolshed is deliberately not a public OSS product polished for arbitrary external operators. It is designed for the maintainer's own use, with the architectural shape that doesn't preclude broader use later.
+prout is deliberately not a public OSS product polished for arbitrary external operators. It is designed for the maintainer's own use, with the architectural shape that doesn't preclude broader use later.
 
 ---
 
@@ -46,7 +46,7 @@ Two to three people who collaborate on the maintainer's OSS projects. They need 
 
 ### Anticipated Later (Not MVP) — Other Personal-Scale Operators
 
-Other solo or small-team OSS maintainers running their own infrastructure who might find Toolshed useful for their own setups. The architecture leaves room for this, but no MVP effort is spent on polished onboarding, multi-tenant support, or marketplace concerns.
+Other solo or small-team OSS maintainers running their own infrastructure who might find prout useful for their own setups. The architecture leaves room for this, but no MVP effort is spent on polished onboarding, multi-tenant support, or marketplace concerns.
 
 ---
 
@@ -54,10 +54,10 @@ Other solo or small-team OSS maintainers running their own infrastructure who mi
 
 ### Onboarding & Setup
 
-1. As the operator, I want to deploy Toolshed on my VPS using a single `docker-compose up` command, so that I can get the system running without complex infrastructure setup.
-2. As the operator, I want to provide system-level configuration (wildcard domain, GitHub App credentials, Cloudflare API token, encryption keys, defaults) once at install time via a config file at `/etc/toolshed/server.yml`, so that bootstrapping is explicit and version-controllable on my host.
+1. As the operator, I want to deploy prout on my VPS using a single `docker-compose up` command, so that I can get the system running without complex infrastructure setup.
+2. As the operator, I want to provide system-level configuration (wildcard domain, GitHub App credentials, Cloudflare API token, encryption keys, defaults) once at install time via a config file at `/etc/prout/server.yml`, so that bootstrapping is explicit and version-controllable on my host.
 3. As the operator, I want to configure the bootstrap owner (my own GitHub username) in `server.yml`, so that on first start I'm automatically added as the panel owner without an out-of-band setup step.
-4. As the operator, I want Toolshed to register a repository automatically when I install the GitHub App on it, so that no separate registration step is required.
+4. As the operator, I want prout to register a repository automatically when I install the GitHub App on it, so that no separate registration step is required.
 5. As the operator, I want repositories to start in a "configured but disabled" state after registration, so that no triggers fire until I deliberately enable them.
 
 ### Repository Configuration (Web Panel)
@@ -86,8 +86,8 @@ Other solo or small-team OSS maintainers running their own infrastructure who mi
 
 ### Build & Deployment
 
-21. As the operator, I want Toolshed to download the PR's code at the exact head commit (including from forks) and build the application using `docker compose`, so that the preview matches the project's own build definition.
-22. As the operator, I want non-sensitive environment variables (configured per-repository in the panel) and auto-injected `TOOLSHED_*` variables (PR number, preview URL, commit SHA) to be available to the preview application, so that the app can adapt its behavior without me hand-wiring each value.
+21. As the operator, I want prout to download the PR's code at the exact head commit (including from forks) and build the application using `docker compose`, so that the preview matches the project's own build definition.
+22. As the operator, I want non-sensitive environment variables (configured per-repository in the panel) and auto-injected `prout_*` variables (PR number, preview URL, commit SHA) to be available to the preview application, so that the app can adapt its behavior without me hand-wiring each value.
 23. As the operator, I want build logs streamed to the panel in real time and persisted in the database, so that I can diagnose failures from the web UI rather than SSH.
 24. As the operator, I want failed builds to report failure status on the PR with a link to log output, so that contributors are immediately aware without polling.
 
@@ -113,14 +113,14 @@ Other solo or small-team OSS maintainers running their own infrastructure who mi
 
 ### Failure & Recovery
 
-36. As the operator, I want Toolshed to recover gracefully from a service restart — reconciling running containers against database state, removing orphans, marking missing environments as destroyed, and re-enqueuing interrupted jobs — so that a server reboot doesn't require manual cleanup.
+36. As the operator, I want prout to recover gracefully from a service restart — reconciling running containers against database state, removing orphans, marking missing environments as destroyed, and re-enqueuing interrupted jobs — so that a server reboot doesn't require manual cleanup.
 37. As the operator, I want the application to fail fast with a clear instruction at startup if the database schema is out of date, so that I never silently run an old binary against a new schema or vice versa.
 38. As the operator, I want webhook events to be deduplicated by delivery ID, so that GitHub's at-least-once delivery doesn't cause double deployments.
 39. As the operator, I want all configuration changes, runtime actions, and trigger evaluations recorded in an audit log, so that I can reconstruct what happened when something behaves unexpectedly.
 
 ### Administration via CLI
 
-40. As the operator, I want a CLI on the same binary for administrative operations (`toolshed migrate up`, `toolshed reconcile`, `toolshed env list`, `toolshed env destroy <id>`, `toolshed logs <pr-number>`), so that I can script and SSH-debug without depending on the panel.
+40. As the operator, I want a CLI on the same binary for administrative operations (`prout migrate up`, `prout reconcile`, `prout env list`, `prout env destroy <id>`, `prout logs <pr-number>`), so that I can script and SSH-debug without depending on the panel.
 
 ---
 
@@ -128,7 +128,7 @@ Other solo or small-team OSS maintainers running their own infrastructure who mi
 
 ### GitHub Integration
 
-- Toolshed operates as a single GitHub App. All API access uses short-lived installation access tokens generated from the App's private key.
+- prout operates as a single GitHub App. All API access uses short-lived installation access tokens generated from the App's private key.
 - Required permissions: `contents: read` (tarball download), `pull_requests: write` (PR comments), `statuses: write` (commit status), `metadata: read`.
 - Webhook subscriptions: `pull_request` (opened, synchronize, closed, labeled), `issue_comment` (created — for `/deploy`-style commands), `installation` (created, deleted).
 - All GitHub interactions are server-side; forks never receive any credentials.
@@ -138,7 +138,7 @@ Other solo or small-team OSS maintainers running their own infrastructure who mi
 
 Each piece of configuration has exactly one source of truth.
 
-- **Server config** (`/etc/toolshed/server.yml` plus environment variables) defines: wildcard domain, GitHub App credentials (App ID, private key path, webhook secret), GitHub OAuth credentials, Cloudflare API token, ACME email, default resource limits, bootstrap owner GitHub username. Loaded once at startup. Edited via SSH only.
+- **Server config** (`/etc/prout/server.yml` plus environment variables) defines: wildcard domain, GitHub App credentials (App ID, private key path, webhook secret), GitHub OAuth credentials, Cloudflare API token, ACME email, default resource limits, bootstrap owner GitHub username. Loaded once at startup. Edited via SSH only.
 - **Web panel** defines: per-repository enable/disable, triggers, lifecycle (TTL, max concurrent), environment variables (non-sensitive, plain text), exposed service name and port, compose file path, allowed users.
 - **CLI** exposes administrative operations: `init`, `migrate up/down/status`, `reconcile`, `env list`, `env destroy`, `logs <pr-number>`. Same backing operations as the panel where applicable.
 
@@ -156,11 +156,11 @@ The panel does not edit server config. The CLI does not edit per-repo config in 
 ### Build System
 
 - MVP supports Docker Compose as the only build/run target.
-- Toolshed downloads PR head as a tarball via the GitHub REST API at the specific commit SHA (no `git clone`, no submodule support, no LFS in MVP).
-- Tarball is extracted into an isolated workspace directory under `/var/lib/toolshed/workspaces/{job-id}/`.
+- prout downloads PR head as a tarball via the GitHub REST API at the specific commit SHA (no `git clone`, no submodule support, no LFS in MVP).
+- Tarball is extracted into an isolated workspace directory under `/var/lib/prout/workspaces/{job-id}/`.
 - The user-provided `docker-compose.preview.yml` is parsed and sanitized — privileged mode, capability adds, host bind mounts, host PID/network/IPC, devices, are rejected. Only named volumes and relative-path volumes within the workspace are permitted.
-- Toolshed injects into the generated compose: resource limits (CPU, memory, PIDs from server defaults), Traefik routing labels, the project network, `TOOLSHED_*` metadata environment variables, and per-repository configured environment variables.
-- Build executes via subprocess `docker compose -f ... -p toolshed-pr-{n} up -d --build`.
+- prout injects into the generated compose: resource limits (CPU, memory, PIDs from server defaults), Traefik routing labels, the project network, `prout_*` metadata environment variables, and per-repository configured environment variables.
+- Build executes via subprocess `docker compose -f ... -p prout-pr-{n} up -d --build`.
 - Container introspection (listing, inspect, network state, events) uses the Docker Engine SDK directly.
 - The Docker daemon is accessed exclusively through `tecnativa/docker-socket-proxy` with a filtered API surface.
 - Build logs (stdout and stderr) are streamed line-by-line to PostgreSQL and to active Server-Sent Events subscribers in real time.
@@ -168,9 +168,9 @@ The panel does not edit server config. The CLI does not edit per-repo config in 
 
 ### Routing & TLS
 
-- Traefik v3 runs as part of the Toolshed compose stack and uses the Docker provider through the socket proxy.
+- Traefik v3 runs as part of the prout compose stack and uses the Docker provider through the socket proxy.
 - Each preview environment is assigned the subdomain `pr-{number}.preview.{wildcard-domain}` (configured wildcard).
-- Routing is applied via Docker labels injected by Toolshed onto the exposed service container.
+- Routing is applied via Docker labels injected by prout onto the exposed service container.
 - TLS certificates are provisioned via Let's Encrypt DNS-01 challenge through Cloudflare. A wildcard certificate covers all preview subdomains.
 - The wildcard A record (`*.preview.{domain} → VPS_IP`) must be configured in Cloudflare with proxy disabled (DNS-01 incompatibility); this is documented as a one-time manual step.
 - Only one exposed service per preview environment is supported in MVP.
@@ -182,7 +182,7 @@ The panel does not edit server config. The CLI does not edit per-repo config in 
 - A new commit pushed to an open PR triggers a redeploy that destroys the existing environment and builds a fresh one at the new SHA.
 - All state (registered repositories, configurations, environments, webhook events, audit log, build logs) is persisted in PostgreSQL.
 - Database schema is the single source of truth; Docker container state is reconciled against the database on startup and detected drift is corrected.
-- On startup, Toolshed performs reconciliation: orphan containers are removed, missing containers are marked destroyed in the DB, jobs left in `running` state at the previous crash are re-enqueued.
+- On startup, prout performs reconciliation: orphan containers are removed, missing containers are marked destroyed in the DB, jobs left in `running` state at the previous crash are re-enqueued.
 
 ### Authentication & Authorization
 
@@ -195,7 +195,7 @@ The panel does not edit server config. The CLI does not edit per-repo config in 
 ### Environment Variables for Preview Environments
 
 - Three layers, merged in this order at deploy time:
-  1. Auto-injected `TOOLSHED_*` (PR number, PR URL, commit SHA, preview URL, preview domain).
+  1. Auto-injected `prout_*` (PR number, PR URL, commit SHA, preview URL, preview domain).
   2. Per-repository env vars configured in the panel — plain text, key/value list, stored in `repository_env_vars` table.
   3. Compose-defined values inside `docker-compose.preview.yml` (left intact).
 - The panel UI displays a clear notice: "stored in plain text — use only test/sandbox API keys."
@@ -204,9 +204,9 @@ The panel does not edit server config. The CLI does not edit per-repo config in 
 ### Database Migrations
 
 - Migrations are managed via `goose` with embedded SQL files (`embed.FS`).
-- Migrations are not auto-applied at startup. The operator runs `toolshed migrate up` deliberately as part of an upgrade.
+- Migrations are not auto-applied at startup. The operator runs `prout migrate up` deliberately as part of an upgrade.
 - At startup, the application checks the current schema version against the version embedded in the binary; if the DB is out of date, the application fails fast with a clear instruction. If the DB is ahead, it logs a warning but continues.
-- River's own schema migrations are wrapped as Go-based `goose` migrations so a single `toolshed migrate up` covers everything.
+- River's own schema migrations are wrapped as Go-based `goose` migrations so a single `prout migrate up` covers everything.
 
 ---
 
@@ -223,7 +223,7 @@ The panel does not edit server config. The CLI does not edit per-repo config in 
 ### Performance
 
 - For typical Docker Compose builds, the time from PR event to PR comment with preview URL should be under 5 minutes.
-- The Toolshed control plane has a minimal resource footprint — it orchestrates containers, it does not run workloads.
+- The prout control plane has a minimal resource footprint — it orchestrates containers, it does not run workloads.
 - Build CPU and disk I/O are the realistic bottlenecks. Per-repository `max_concurrent` and server-wide resource caps mitigate contention.
 
 ### Security
@@ -238,7 +238,7 @@ The panel does not edit server config. The CLI does not edit per-repo config in 
 ### Operational Footprint
 
 - Single binary deployed via Docker. The binary contains the HTTP server, panel templates, static assets, CLI commands, worker pool, and embedded migrations.
-- Single VPS deployment topology. Toolshed and all preview environments share the host.
+- Single VPS deployment topology. prout and all preview environments share the host.
 - One PostgreSQL database co-located in the compose stack.
 - Application logs to stdout as structured JSON via `slog`.
 - No metrics or alerting in MVP. The operator notices issues through missing PR comments or visible panel state.
@@ -257,7 +257,7 @@ The panel does not edit server config. The CLI does not edit per-repo config in 
 
 ## Success Metrics
 
-Toolshed is a personal-scale tool. Adoption-style metrics (GitHub stars, external installations) are not goals.
+prout is a personal-scale tool. Adoption-style metrics (GitHub stars, external installations) are not goals.
 
 ### Operator-Level Metrics
 
@@ -277,12 +277,12 @@ Toolshed is a personal-scale tool. Adoption-style metrics (GitHub stars, externa
 
 ### Anti-Metrics (Things Not to Optimize For)
 
-- GitHub stars on the Toolshed repository.
+- GitHub stars on the prout repository.
 - Number of external installations.
 - Onboarding time for hypothetical new operators.
 - Polish of public-facing documentation.
 
-These are explicitly not goals in MVP. Pursuing them costs effort that should go into the operator's own OSS projects, not into Toolshed itself.
+These are explicitly not goals in MVP. Pursuing them costs effort that should go into the operator's own OSS projects, not into prout itself.
 
 ---
 
@@ -343,15 +343,15 @@ The following are deliberately excluded. Each is recoverable later through a cle
 ### Project Risks
 
 - **Scope creep toward "public OSS product."** The personal-scale framing is the entire point — drifting toward polished onboarding, multi-tenant features, or marketplace concerns destroys the MVP's tractability. Mitigated by explicit "anti-metrics" in this document and by the ADRs that name what is deliberately deferred.
-- **Toolshed itself becoming the OSS project that demands maintenance.** Same root cause as above. Mitigated by deliberately not promoting the project externally during the MVP phase.
+- **prout itself becoming the OSS project that demands maintenance.** Same root cause as above. Mitigated by deliberately not promoting the project externally during the MVP phase.
 
 ---
 
 ## Further Notes
 
-Toolshed is named for the metaphor of a shared space where tools are kept ready to use. The name reinforces the product's positioning: practical, local, and built for the person who works there.
+prout is named for the metaphor of a shared space where tools are kept ready to use. The name reinforces the product's positioning: practical, local, and built for the person who works there.
 
-The product's north star: **the operator's own OSS work spends less time on automation toil because Toolshed exists.** Every architectural decision is evaluated against this. If a feature would help a hypothetical external user but doesn't measurably help the operator, it is deferred or rejected.
+The product's north star: **the operator's own OSS work spends less time on automation toil because prout exists.** Every architectural decision is evaluated against this. If a feature would help a hypothetical external user but doesn't measurably help the operator, it is deferred or rejected.
 
 The architecture preserves an evolution path toward broader use — process separation, multi-host workers, Kubernetes runtime, encrypted secrets, RBAC, plugin interface, additional VCS providers — without realizing any of it in MVP. Each deferred capability has a documented migration path in the ADRs. This is the discipline of "personal-scale today, optionally more later" rather than "personal-scale today, permanently locked to personal-scale."
 

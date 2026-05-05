@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-As the Operator, I can already see Toolshed accept a GitHub Delivery, evaluate Triggers, create durable Operation Requests, and create or reuse a Preview Environment attempt. What I still cannot see is the first real source-materialization slice of preview work.
+As the Operator, I can already see prout accept a GitHub Delivery, evaluate Triggers, create durable Operation Requests, and create or reuse a Preview Environment attempt. What I still cannot see is the first real source-materialization slice of preview work.
 
 Today, `preview-start` stops at a Preview Environment in `preparing`. There is no real repository retrieval, no isolated materialized workspace tied to one Runtime Environment attempt, no fork-aware source-repository model for exact head-commit retrieval, no Operator API route centered on Runtime Environments, and no reusable technical state-machine foundation for extending one high-level Operation Type into later preparation and deployment steps.
 
@@ -49,23 +49,23 @@ This phase also extends the Operator API with a runtime-centric read model. The 
 25. As the Operator, I want manual `preview-delete` to remain a separate later concern, so that automatic superseded cleanup does not become entangled with user-initiated deletion semantics.
 26. As the Operator, I want a newer target commit to supersede an older Preview Environment attempt in the same worker transaction that creates the new attempt, so that there is no ambiguity about which attempt is current.
 27. As the Operator, I want a superseded attempt’s cleanup Operation Request to be created in the same transaction as the superseded state change, so that cleanup intent is never lost.
-28. As the Operator, I do not want Toolshed to rely on active cancellation of already-running workers, so that the execution model stays simple and robust.
+28. As the Operator, I do not want prout to rely on active cancellation of already-running workers, so that the execution model stays simple and robust.
 29. As the Operator, I want an in-flight superseded worker to re-check its attempt state at safe boundaries and refuse to promote itself to `prepared`, so that older work cannot overwrite newer intent.
 30. As the Operator, I want technical retries of the same Operation Request to stay within the same Runtime Environment attempt, so that transient tarball or extraction failures do not create duplicate attempts.
 31. As the Operator, I want a Runtime Environment attempt to become `failed` only after a permanent error or exhausted retries, so that transient errors do not prematurely close the attempt.
 32. As the Operator, I want a later domain-level retry after `failed` to create a new Runtime Environment attempt and a new workspace locator, so that historical failures stay closed and inspectable.
-33. As the Operator, I want Toolshed to detect when a supposedly `prepared` attempt no longer has a valid workspace, so that stale database state cannot be mistaken for a real deployment input.
+33. As the Operator, I want prout to detect when a supposedly `prepared` attempt no longer has a valid workspace, so that stale database state cannot be mistaken for a real deployment input.
 34. As the Operator, I want `preview-start` to create a fresh attempt when it finds an invalid or missing workspace behind a previously prepared target, so that repair is automatic at the operation boundary.
 35. As the Operator, I want `preview-start` to remain one business-level Operation Type, so that repeated preview requests express one stable user intent even as the internal pipeline grows.
-36. As the future maintainer of Toolshed, I want fine-grained source and deployment progress to be tracked as technical step state rather than exploding the Runtime Environment Status enum, so that the domain model stays readable.
-37. As the future maintainer of Toolshed, I want technical step state to live on the Operation Request, so that step progress belongs to one execution of one operation rather than to the long-lived Runtime Environment identity.
-38. As the future maintainer of Toolshed, I want a reusable operation-scoped state-machine interface, so that future Operation Types can share the same execution pattern without duplicating transition logic.
-39. As the future maintainer of Toolshed, I want `preview-start` to provide the first machine definition for that interface, so that later work extends a proven abstraction rather than inventing a second one.
-40. As the future maintainer of Toolshed, I want the operator-visible Runtime Environment Status model to stay coarse while the step machine carries details like source retrieval and deployment progress, so that UI and audit language remain stable.
-41. As the future maintainer of Toolshed, I want the state machine to be scoped by Operation Type, so that different operations can evolve different technical pipelines without polluting one shared enum.
-42. As the future maintainer of Toolshed, I want state-machine transitions to be validated centrally, so that later phases do not introduce invalid or contradictory step updates.
-43. As the future maintainer of Toolshed, I want deep modules around storage resolution, workspace materialization, and operation step progression, so that later runtime backends can reuse them without invasive rewrites.
-44. As the future maintainer of Toolshed, I want the resulting Phase 3B slice to leave Docker Compose startup, health checks, and other future steps as extensions of the same model rather than as separate ad hoc pipelines.
+36. As the future maintainer of prout, I want fine-grained source and deployment progress to be tracked as technical step state rather than exploding the Runtime Environment Status enum, so that the domain model stays readable.
+37. As the future maintainer of prout, I want technical step state to live on the Operation Request, so that step progress belongs to one execution of one operation rather than to the long-lived Runtime Environment identity.
+38. As the future maintainer of prout, I want a reusable operation-scoped state-machine interface, so that future Operation Types can share the same execution pattern without duplicating transition logic.
+39. As the future maintainer of prout, I want `preview-start` to provide the first machine definition for that interface, so that later work extends a proven abstraction rather than inventing a second one.
+40. As the future maintainer of prout, I want the operator-visible Runtime Environment Status model to stay coarse while the step machine carries details like source retrieval and deployment progress, so that UI and audit language remain stable.
+41. As the future maintainer of prout, I want the state machine to be scoped by Operation Type, so that different operations can evolve different technical pipelines without polluting one shared enum.
+42. As the future maintainer of prout, I want state-machine transitions to be validated centrally, so that later phases do not introduce invalid or contradictory step updates.
+43. As the future maintainer of prout, I want deep modules around storage resolution, workspace materialization, and operation step progression, so that later runtime backends can reuse them without invasive rewrites.
+44. As the future maintainer of prout, I want the resulting Phase 3B slice to leave Docker Compose startup, health checks, and other future steps as extensions of the same model rather than as separate ad hoc pipelines.
 45. As the Operator, I want a runtime-centric Operator API endpoint for Runtime Environments, so that I can inspect preview lifecycle state without starting from Webhook Event audit views.
 46. As the Operator, I want each Runtime Environment in that API to include its linked Pull Request summary, so that I can immediately see which pull request a status belongs to.
 47. As the Operator, I want that API to support filtering by `repository_id`, so that I can narrow the view to one managed Repository.
@@ -94,7 +94,7 @@ This phase also extends the Operator API with a runtime-centric read model. The 
 - Cleanup in Phase 3B includes both local technical cleanup of staging/partial materialization state and the first executable automatic cleanup flow for superseded attempts.
 - Manual `preview-delete`, TTL cleanup, and broader teardown orchestration remain later concerns.
 - When a newer Pull Request Head Commit creates a new Preview Environment attempt, the older attempt becomes `superseded` in the same transaction and a cleanup-style Operation Request for that older attempt is created there as well.
-- Toolshed does not implement active cancellation for in-flight superseded workers. Instead, workers must re-check attempt state at safe boundaries and refuse to promote a superseded attempt to `prepared`.
+- prout does not implement active cancellation for in-flight superseded workers. Instead, workers must re-check attempt state at safe boundaries and refuse to promote a superseded attempt to `prepared`.
 - Technical retries of one Operation Request stay within the same Runtime Environment attempt. A Runtime Environment becomes `failed` only after a permanent error or exhausted retries.
 - A later domain-level retry after `failed` creates a new Runtime Environment attempt rather than reopening the failed one.
 - A `prepared` attempt is only trustworthy while its workspace remains valid. If the workspace is missing or invalid, later `preview-start` handling should treat that prepared state as inconsistent and create a new attempt for the same target.
@@ -106,8 +106,8 @@ This phase also extends the Operator API with a runtime-centric read model. The 
 - Phase 3B adds a runtime-centric Operator API read model alongside the existing webhook-centric audit views rather than replacing those webhook views.
 - The runtime read surface should expose a `GET /api/runtime-environments` endpoint that lists Runtime Environments with linked Pull Request summary data needed for operator inspection.
 - The runtime read model should include at minimum the Runtime Environment identity and status together with the linked Pull Request identity needed for operator inspection, including the pull request number.
-- Runtime list filtering should accept `repository_id` and `pr_number` query parameters. `repository_id` means the internal Toolshed Repository identifier, consistent with the existing Operator API.
-- Pull-request filtering should use the natural Operator-facing key pair `repository_id + pr_number` rather than requiring the internal Toolshed `pull_request_id`.
+- Runtime list filtering should accept `repository_id` and `pr_number` query parameters. `repository_id` means the internal prout Repository identifier, consistent with the existing Operator API.
+- Pull-request filtering should use the natural Operator-facing key pair `repository_id + pr_number` rather than requiring the internal prout `pull_request_id`.
 - Runtime list results should return every matching Runtime Environment attempt rather than collapsing to only the latest attempt, and the default ordering should be newest first.
 - The first deep modules in this phase should include:
   - a Pull Request target resolver that can hydrate exact source-repository and head-commit data

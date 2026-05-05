@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-Toolshed currently emits structured application logs for exceptional events inside handlers and workers, but it does not emit a consistent request-lifecycle log for HTTP traffic. From the operator's perspective, this makes the server harder to observe: there is no single record showing which route was hit, how long it took, what status it returned, how many bytes were written, or whether a failure came from routing, authorization, handler logic, or readiness checks. The current state also lacks a clean integration point for future route-specific enrichment, which means new logging behavior would tend to leak into individual handlers instead of remaining a reusable server capability.
+prout currently emits structured application logs for exceptional events inside handlers and workers, but it does not emit a consistent request-lifecycle log for HTTP traffic. From the operator's perspective, this makes the server harder to observe: there is no single record showing which route was hit, how long it took, what status it returned, how many bytes were written, or whether a failure came from routing, authorization, handler logic, or readiness checks. The current state also lacks a clean integration point for future route-specific enrichment, which means new logging behavior would tend to leak into individual handlers instead of remaining a reusable server capability.
 
 ## Solution
 
@@ -39,7 +39,7 @@ Introduce an always-on HTTP request logging middleware mounted on the root route
 - Continue to rely on the existing contextual logger behavior to attach the request identifier automatically.
 - Preserve handler-level logs for exceptional conditions and domain outcomes rather than moving business logging into the request middleware.
 - Provide a request-scoped enrichment API so downstream handlers or nested middleware can append attributes before the completion log is emitted.
-- Reserve `repository_id` for the internal Toolshed Repository identifier and use `github_repository_id` when only the GitHub repository identifier is available.
+- Reserve `repository_id` for the internal prout Repository identifier and use `github_repository_id` when only the GitHub repository identifier is available.
 - Prefer the matched route pattern for the canonical route field and keep the raw URL path as a separate field.
 - Map response classes to log levels in the middleware: normal completions at info, client errors at warn, and server errors at error.
 - Include health, readiness, webhook, and operator API traffic in the same request logging flow instead of introducing endpoint suppression in the first version.

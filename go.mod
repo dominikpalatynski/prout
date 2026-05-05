@@ -1,4 +1,4 @@
-module github.com/dominikpalatynski/toolshed
+module github.com/dominikpalatynski/prout
 
 go 1.24.4
 

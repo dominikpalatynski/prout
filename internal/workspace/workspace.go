@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dominikpalatynski/toolshed/internal/config"
+	"github.com/dominikpalatynski/prout/internal/config"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -260,7 +260,7 @@ func (w *WorkspaceHandler) newRequest(ctx context.Context, method, url string, b
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "toolshed")
+	req.Header.Set("User-Agent", "prout")
 	return req, nil
 }
 
@@ -390,7 +390,7 @@ func (w *WorkspaceHandler) createWorkspaceFolder(locationBuilder WorkspaceLocati
 func workspaceFolderPath(locationBuilder WorkspaceLocationBuilder) string {
 	return filepath.Join(
 		".",
-		"toolshed",
+		"prout",
 		"workspaces",
 		fmt.Sprintf("%s-%d-%s", locationBuilder.FullName, locationBuilder.PRNumber, locationBuilder.SHA),
 	)

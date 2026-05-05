@@ -4,7 +4,7 @@ status: accepted
 
 # Event-Family Automation Registry
 
-Toolshed will model built-in automation through one central Event Family registry. Each Event Family owns webhook routing, validation, and normalization into the shared event model, declares the business-named Trigger Types available for that event, and each Trigger Type points to exactly one Operation Type. Repository-specific Triggers only enable one Trigger Type per Repository and do not carry matcher config, while each Operation Type is declared once with one explicit Operation Handler as the known execution entry point. This keeps extension declarative, removes duplicated trigger metadata from the Repository layer, and replaces scattered switch-based dispatch with one obvious source of truth.
+prout will model built-in automation through one central Event Family registry. Each Event Family owns webhook routing, validation, and normalization into the shared event model, declares the business-named Trigger Types available for that event, and each Trigger Type points to exactly one Operation Type. Repository-specific Triggers only enable one Trigger Type per Repository and do not carry matcher config, while each Operation Type is declared once with one explicit Operation Handler as the known execution entry point. This keeps extension declarative, removes duplicated trigger metadata from the Repository layer, and replaces scattered switch-based dispatch with one obvious source of truth.
 
 ## Considered Options
 

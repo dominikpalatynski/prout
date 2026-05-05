@@ -1,4 +1,4 @@
-# Toolshed — Scaffold Technical Specification
+# prout — Scaffold Technical Specification
 
 This document captures all technical decisions made during the project-scaffolding interview, prior to writing the first line of code. It complements `prd.md` (product scope) and `adr_tech.md` (architecture decisions). Where this document and `adr_tech.md` overlap, this document is the **operational refinement** — the concrete shape decisions take in the repository.
 
@@ -31,7 +31,7 @@ This document captures all technical decisions made during the project-scaffoldi
 | Build pipeline | Multi-stage Dockerfile, generated code **not committed** | §11 |
 | Production stack | `compose.yml` with secrets file-mounted, 2 networks (traefik + internal) | §11 |
 | CI | GitHub Actions, split into `ci.yml` (PR gates) + `release.yml` (image push) | §12 |
-| Image registry | `ghcr.io/<user>/toolshed`, tags `:latest` + `:sha-<short>` | §12 |
+| Image registry | `ghcr.io/<user>/prout`, tags `:latest` + `:sha-<short>` | §12 |
 | Image architecture | `linux/amd64` only (multi-arch deferred) | §12 |
 | Dependency bot | None (deferred) | §12 |
 | Logging | `log/slog` + JSON/text via config + custom ctx-aware handler + `tint` (dev) | §13 |
@@ -45,9 +45,9 @@ This document captures all technical decisions made during the project-scaffoldi
 ## 1. Folder Structure
 
 ```
-toolshed/
+prout/
 ├── cmd/
-│   └── toolshed/
+│   └── prout/
 │       └── main.go                  # cobra root, single binary
 │
 ├── internal/
@@ -111,7 +111,7 @@ toolshed/
 │
 ├── compose.yml                      # operator production stack
 ├── compose.dev.yml                  # local dev infra (Postgres + riverui)
-├── server.yml.example               # template for /etc/toolshed/server.yml
+├── server.yml.example               # template for /etc/prout/server.yml
 │
 ├── Taskfile.yml                     # task orchestration (§3)
 ├── .mise.toml                       # non-Go tool versions (§2)
@@ -127,7 +127,7 @@ toolshed/
 └── LICENSE                          # MIT
 ```
 
-**Rationale:** All application code under `internal/` so the Go compiler enforces zero external import surface. `cmd/toolshed/` is the single binary entry point. `web/` lives inside `internal/` because templ-generated `.templ.go` files are part of the Go package graph anyway. `migrations/` and `deploy/` live at root because they are non-Go artifacts referenced by external tooling (goose CLI, `docker compose`).
+**Rationale:** All application code under `internal/` so the Go compiler enforces zero external import surface. `cmd/prout/` is the single binary entry point. `web/` lives inside `internal/` because templ-generated `.templ.go` files are part of the Go package graph anyway. `migrations/` and `deploy/` live at root because they are non-Go artifacts referenced by external tooling (goose CLI, `docker compose`).
 
 The `internal/runtime/` interface materializes the K8s escape-hatch from ADR-005 — swap implementation, not restructure system.
 
@@ -140,7 +140,7 @@ The `internal/runtime/` interface materializes the K8s escape-hatch from ADR-005
 Pinned via `toolchain` directive in `go.mod`:
 
 ```go
-module github.com/dominikpalatynski/toolshed
+module github.com/dominikpalatynski/prout
 
 go 1.26
 
@@ -179,8 +179,8 @@ go = "1.26"
 task = "3"
 
 [env]
-TOOLSHED_LOG_FORMAT = "text"        # dev default
-TOOLSHED_DB_DSN = "postgres://toolshed:toolshed@localhost:5432/toolshed?sslmode=disable"
+prout_LOG_FORMAT = "text"        # dev default
+prout_DB_DSN = "postgres://prout:prout@localhost:5432/prout?sslmode=disable"
 ```
 
 Tailwind CLI is fetched as a standalone binary in production (Dockerfile, §11); locally `mise` manages version. Operator does not need `mise`; only developers do.
@@ -198,7 +198,7 @@ version: "3"
 vars:
   BIN_DIR: ./bin
   TAILWIND: "{{.BIN_DIR}}/tailwindcss"
-  PKG: github.com/dominikpalatynski/toolshed
+  PKG: github.com/dominikpalatynski/prout
 
 tasks:
   setup:
@@ -245,7 +245,7 @@ tasks:
     desc: Build binary
     deps: [generate, tailwind:build]
     cmds:
-      - go build -o {{.BIN_DIR}}/toolshed ./cmd/toolshed
+      - go build -o {{.BIN_DIR}}/prout ./cmd/prout
 
   test:
     desc: Full test suite (incl. testcontainers)
@@ -303,11 +303,11 @@ tasks:
       - task: migrate:up
 
   migrate:up:
-    cmds: ["go tool goose -dir ./migrations postgres \"$TOOLSHED_DB_DSN\" up"]
+    cmds: ["go tool goose -dir ./migrations postgres \"$prout_DB_DSN\" up"]
   migrate:down:
-    cmds: ["go tool goose -dir ./migrations postgres \"$TOOLSHED_DB_DSN\" down"]
+    cmds: ["go tool goose -dir ./migrations postgres \"$prout_DB_DSN\" down"]
   migrate:status:
-    cmds: ["go tool goose -dir ./migrations postgres \"$TOOLSHED_DB_DSN\" status"]
+    cmds: ["go tool goose -dir ./migrations postgres \"$prout_DB_DSN\" status"]
   migrate:create:
     desc: Create new migration file. Usage: task migrate:create -- add_user_role
     cmds:
@@ -389,7 +389,7 @@ package config
 
 type Config struct {
     Server         ServerConfig    `yaml:"server"`
-    BootstrapOwner string          `yaml:"bootstrap_owner" env:"TOOLSHED_BOOTSTRAP_OWNER"`
+    BootstrapOwner string          `yaml:"bootstrap_owner" env:"prout_BOOTSTRAP_OWNER"`
     GitHubApp      GitHubAppConfig `yaml:"github_app"`
     OAuth          OAuthConfig     `yaml:"oauth"`
     ACME           ACMEConfig      `yaml:"acme"`
@@ -399,26 +399,26 @@ type Config struct {
 }
 
 type ServerConfig struct {
-    Bind      string `yaml:"bind" env:"TOOLSHED_BIND"`
-    Domain    string `yaml:"domain" env:"TOOLSHED_DOMAIN"`           // wildcard
-    PanelHost string `yaml:"panel_host" env:"TOOLSHED_PANEL_HOST"`
-    CSRFKey   []byte `yaml:"-" env:"TOOLSHED_CSRF_KEY"`              // 32 bytes
+    Bind      string `yaml:"bind" env:"prout_BIND"`
+    Domain    string `yaml:"domain" env:"prout_DOMAIN"`           // wildcard
+    PanelHost string `yaml:"panel_host" env:"prout_PANEL_HOST"`
+    CSRFKey   []byte `yaml:"-" env:"prout_CSRF_KEY"`              // 32 bytes
 }
 
 type GitHubAppConfig struct {
-    AppID             int64  `yaml:"app_id" env:"TOOLSHED_GH_APP_ID"`
-    PrivateKeyPath    string `yaml:"private_key_path" env:"TOOLSHED_GH_PK_PATH"`
-    WebhookSecretPath string `yaml:"webhook_secret_path" env:"TOOLSHED_GH_WEBHOOK_SECRET_PATH"`
+    AppID             int64  `yaml:"app_id" env:"prout_GH_APP_ID"`
+    PrivateKeyPath    string `yaml:"private_key_path" env:"prout_GH_PK_PATH"`
+    WebhookSecretPath string `yaml:"webhook_secret_path" env:"prout_GH_WEBHOOK_SECRET_PATH"`
 }
 
 type OAuthConfig struct {
-    ClientID         string `yaml:"client_id" env:"TOOLSHED_OAUTH_CLIENT_ID"`
-    ClientSecretPath string `yaml:"client_secret_path" env:"TOOLSHED_OAUTH_CLIENT_SECRET_PATH"`
+    ClientID         string `yaml:"client_id" env:"prout_OAUTH_CLIENT_ID"`
+    ClientSecretPath string `yaml:"client_secret_path" env:"prout_OAUTH_CLIENT_SECRET_PATH"`
 }
 
 type ACMEConfig struct {
-    Email                  string `yaml:"email" env:"TOOLSHED_ACME_EMAIL"`
-    CloudflareAPITokenPath string `yaml:"cloudflare_api_token_path" env:"TOOLSHED_CF_TOKEN_PATH"`
+    Email                  string `yaml:"email" env:"prout_ACME_EMAIL"`
+    CloudflareAPITokenPath string `yaml:"cloudflare_api_token_path" env:"prout_CF_TOKEN_PATH"`
 }
 
 type DefaultsConfig struct {
@@ -430,13 +430,13 @@ type DefaultsConfig struct {
 }
 
 type DBConfig struct {
-    DSN string `yaml:"dsn" env:"TOOLSHED_DB_DSN"`
+    DSN string `yaml:"dsn" env:"prout_DB_DSN"`
 }
 
 type LogConfig struct {
-    Level     string `yaml:"level" env:"TOOLSHED_LOG_LEVEL"`         // debug|info|warn|error
-    Format    string `yaml:"format" env:"TOOLSHED_LOG_FORMAT"`       // json|text
-    AddSource bool   `yaml:"add_source" env:"TOOLSHED_LOG_ADD_SOURCE"`
+    Level     string `yaml:"level" env:"prout_LOG_LEVEL"`         // debug|info|warn|error
+    Format    string `yaml:"format" env:"prout_LOG_FORMAT"`       // json|text
+    AddSource bool   `yaml:"add_source" env:"prout_LOG_ADD_SOURCE"`
 }
 
 func Load(path string) (*Config, error) {
@@ -469,7 +469,7 @@ func (c *Config) LoadCloudflareToken() (string, error) {
 ### 5.2 `server.yml.example` template
 
 ```yaml
-# /etc/toolshed/server.yml — operator-edited at install time
+# /etc/prout/server.yml — operator-edited at install time
 server:
   bind: ":8080"
   domain: "preview.example.com"
@@ -479,16 +479,16 @@ bootstrap_owner: "dominikpalatynski"
 
 github_app:
   app_id: 123456
-  private_key_path: /etc/toolshed/private-key.pem
-  webhook_secret_path: /etc/toolshed/webhook-secret
+  private_key_path: /etc/prout/private-key.pem
+  webhook_secret_path: /etc/prout/webhook-secret
 
 oauth:
   client_id: "Iv1...."
-  client_secret_path: /etc/toolshed/oauth-secret
+  client_secret_path: /etc/prout/oauth-secret
 
 acme:
   email: "ops@example.com"
-  cloudflare_api_token_path: /etc/toolshed/cf-token
+  cloudflare_api_token_path: /etc/prout/cf-token
 
 defaults:
   ttl: 72h
@@ -498,7 +498,7 @@ defaults:
   pids_limit: 512
 
 db:
-  dsn: "postgres://toolshed:CHANGEME@postgres:5432/toolshed?sslmode=disable"
+  dsn: "postgres://prout:CHANGEME@postgres:5432/prout?sslmode=disable"
 
 log:
   level: info
@@ -540,9 +540,9 @@ func Start(t *testing.T) *pgxpool.Pool {
     t.Helper()
     ctx := context.Background()
     pgC, err := postgres.Run(ctx, "postgres:16-alpine",
-        postgres.WithDatabase("toolshed"),
-        postgres.WithUsername("toolshed"),
-        postgres.WithPassword("toolshed"),
+        postgres.WithDatabase("prout"),
+        postgres.WithUsername("prout"),
+        postgres.WithPassword("prout"),
         postgres.BasicWaitStrategies(),
     )
     if err != nil { t.Fatalf("start postgres: %v", err) }
@@ -570,7 +570,7 @@ Tests using testdb start with `if testing.Short() { t.Skip("integration") }` —
 // internal/runtime/runtimetest/fake.go
 package runtimetest
 
-import "github.com/dominikpalatynski/toolshed/internal/runtime"
+import "github.com/dominikpalatynski/prout/internal/runtime"
 
 type Fake struct {
     DeployFn   func(ctx context.Context, p runtime.DeployParams) error
@@ -614,9 +614,9 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd = "go build -o ./tmp/toolshed ./cmd/toolshed"
-  bin = "./tmp/toolshed"
-  full_bin = "./tmp/toolshed server"
+  cmd = "go build -o ./tmp/prout ./cmd/prout"
+  bin = "./tmp/prout"
+  full_bin = "./tmp/prout server"
   include_ext = ["go"]
   exclude_dir = ["tmp", "bin", "vendor", ".task", "internal/web/static", "node_modules"]
   exclude_regex = [".*_templ\\.go$"]   # don't watch generated; templ-watch already handles
@@ -699,7 +699,7 @@ formatters:
       sections:
         - standard
         - default
-        - prefix(github.com/dominikpalatynski/toolshed)
+        - prefix(github.com/dominikpalatynski/prout)
 
 issues:
   max-issues-per-linter: 0
@@ -730,13 +730,13 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: toolshed
-      POSTGRES_PASSWORD: toolshed
-      POSTGRES_DB: toolshed
+      POSTGRES_USER: prout
+      POSTGRES_PASSWORD: prout
+      POSTGRES_DB: prout
     ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "toolshed"]
+      test: ["CMD", "pg_isready", "-U", "prout"]
       interval: 2s
       timeout: 5s
       retries: 10
@@ -744,7 +744,7 @@ services:
   riverui:
     image: ghcr.io/riverqueue/riverui:latest
     environment:
-      DATABASE_URL: postgres://toolshed:toolshed@postgres:5432/toolshed?sslmode=disable
+      DATABASE_URL: postgres://prout:prout@postgres:5432/prout?sslmode=disable
     ports: ["8081:8080"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -832,8 +832,8 @@ RUN go tool templ generate \
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
       -ldflags="-s -w -X main.version=${VERSION}" \
-      -o /out/toolshed \
-      ./cmd/toolshed
+      -o /out/prout \
+      ./cmd/prout
 
 # ============================================
 # Stage 3: runtime
@@ -844,19 +844,19 @@ RUN apk add --no-cache \
       docker-cli-compose \
       ca-certificates \
       tzdata \
- && addgroup -S toolshed \
- && adduser -S toolshed -G toolshed -G docker
+ && addgroup -S prout \
+ && adduser -S prout -G prout -G docker
 
-COPY --from=build /out/toolshed /usr/local/bin/toolshed
+COPY --from=build /out/prout /usr/local/bin/prout
 
-USER toolshed
-WORKDIR /var/lib/toolshed
+USER prout
+WORKDIR /var/lib/prout
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:8080/healthz || exit 1
 
-ENTRYPOINT ["/usr/local/bin/toolshed"]
+ENTRYPOINT ["/usr/local/bin/prout"]
 CMD ["server"]
 ```
 
@@ -871,13 +871,13 @@ services:
     environment:
       POSTGRES_USER_FILE: /run/secrets/postgres_user
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-      POSTGRES_DB: toolshed
+      POSTGRES_DB: prout
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$(cat /run/secrets/postgres_user)"]
       interval: 5s
     secrets: [postgres_user, postgres_password]
-    networks: [toolshed-internal]
+    networks: [prout-internal]
 
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3
@@ -891,7 +891,7 @@ services:
       BUILD: 1
       EVENTS: 1
     volumes: ["/var/run/docker.sock:/var/run/docker.sock:ro"]
-    networks: [toolshed-internal]
+    networks: [prout-internal]
 
   traefik:
     image: traefik:v3
@@ -914,18 +914,18 @@ services:
     volumes: ["acme:/acme"]
     secrets: [cf_token]
     depends_on: [docker-socket-proxy]
-    networks: [toolshed-traefik, toolshed-internal]
+    networks: [prout-traefik, prout-internal]
 
-  toolshed:
-    image: ghcr.io/dominikpalatynski/toolshed:latest
+  prout:
+    image: ghcr.io/dominikpalatynski/prout:latest
     restart: unless-stopped
     environment:
       DOCKER_HOST: tcp://docker-socket-proxy:2375
-      TOOLSHED_CONFIG: /etc/toolshed/server.yml
+      prout_CONFIG: /etc/prout/server.yml
     volumes:
-      - "./server.yml:/etc/toolshed/server.yml:ro"
-      - "./secrets/github-private-key.pem:/etc/toolshed/private-key.pem:ro"
-      - "workspaces:/var/lib/toolshed/workspaces"
+      - "./server.yml:/etc/prout/server.yml:ro"
+      - "./secrets/github-private-key.pem:/etc/prout/private-key.pem:ro"
+      - "workspaces:/var/lib/prout/workspaces"
     depends_on:
       postgres: { condition: service_healthy }
       docker-socket-proxy: { condition: service_started }
@@ -935,8 +935,8 @@ services:
       - "traefik.http.routers.panel.entrypoints=websecure"
       - "traefik.http.routers.panel.tls.certresolver=letsencrypt"
       - "traefik.http.services.panel.loadbalancer.server.port=8080"
-      - "traefik.docker.network=toolshed-traefik"
-    networks: [toolshed-traefik, toolshed-internal]
+      - "traefik.docker.network=prout-traefik"
+    networks: [prout-traefik, prout-internal]
 
 volumes:
   pgdata: {}
@@ -944,8 +944,8 @@ volumes:
   workspaces: {}
 
 networks:
-  toolshed-traefik: {}
-  toolshed-internal: {}
+  prout-traefik: {}
+  prout-internal: {}
 
 secrets:
   postgres_user: { file: ./deploy/secrets/postgres_user }
@@ -953,7 +953,7 @@ secrets:
   cf_token: { file: ./deploy/secrets/cf_token }
 ```
 
-**Security-relevant choices:** Postgres lives on `toolshed-internal` only — never reachable by Traefik or preview containers. Docker socket reaches the host only via the filtered proxy. Secrets are file-mounted (`docker secret`-style) so Postgres reads `_FILE` env vars without ever logging plaintext.
+**Security-relevant choices:** Postgres lives on `prout-internal` only — never reachable by Traefik or preview containers. Docker socket reaches the host only via the filtered proxy. Secrets are file-mounted (`docker secret`-style) so Postgres reads `_FILE` env vars without ever logging plaintext.
 
 ---
 
@@ -1013,7 +1013,7 @@ jobs:
           curl -sSL https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.17/tailwindcss-linux-x64 -o /tmp/tailwindcss
           chmod +x /tmp/tailwindcss
       - run: /tmp/tailwindcss -i ./internal/web/styles/input.css -o ./internal/web/static/output.css --minify
-      - run: go build -o /tmp/toolshed ./cmd/toolshed
+      - run: go build -o /tmp/prout ./cmd/prout
 ```
 
 ### 12.2 `.github/workflows/release.yml`
@@ -1043,7 +1043,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/dominikpalatynski/toolshed
+          images: ghcr.io/dominikpalatynski/prout
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-
@@ -1168,7 +1168,7 @@ Usage convention: **always** `slog.InfoContext(ctx, ...)` (with `Context` suffix
 ### 14.1 Layout
 
 ```
-toolshed/
+prout/
 ├── migrations/
 │   ├── 00001_initial_schema.sql
 │   ├── 00002_repository_env_vars.sql
@@ -1230,7 +1230,7 @@ import (
     "github.com/jackc/pgx/v5"
     "github.com/jackc/pgx/v5/pgxpool"
 
-    "github.com/dominikpalatynski/toolshed/internal/store/sqlc"
+    "github.com/dominikpalatynski/prout/internal/store/sqlc"
 )
 
 type Store struct {
@@ -1325,7 +1325,7 @@ func downRiverInit(ctx context.Context, tx *sql.Tx) error {
 }
 ```
 
-Single command (`task migrate:up`) covers both Toolshed-owned and River-owned tables.
+Single command (`task migrate:up`) covers both prout-owned and River-owned tables.
 
 ### 14.6 ent / GORM revisit (open)
 
@@ -1360,7 +1360,7 @@ deploy/Dockerfile
 deploy/secrets/.gitkeep                    # actual secrets gitignored
 .github/workflows/ci.yml
 .github/workflows/release.yml
-cmd/toolshed/main.go                        # cobra root, "server" subcommand
+cmd/prout/main.go                        # cobra root, "server" subcommand
 internal/config/config.go
 internal/config/defaults.go
 internal/config/validate.go

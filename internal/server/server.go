@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dominikpalatynski/toolshed/internal/config"
-	"github.com/dominikpalatynski/toolshed/internal/github"
-	"github.com/dominikpalatynski/toolshed/internal/log"
-	"github.com/dominikpalatynski/toolshed/internal/workspace"
+	"github.com/dominikpalatynski/prout/internal/config"
+	"github.com/dominikpalatynski/prout/internal/github"
+	"github.com/dominikpalatynski/prout/internal/log"
+	"github.com/dominikpalatynski/prout/internal/workspace"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )

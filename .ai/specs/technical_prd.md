@@ -1,4 +1,4 @@
-# Toolshed — Technical Architecture Document
+# prout — Technical Architecture Document
 
 **GitHub Automation Bot — Self-Hosted, Personal-Scale**
 *Version 2.0 · MVP Technical Specification · April 2026*
@@ -7,7 +7,7 @@
 
 ## Overview
 
-Toolshed is a self-hosted GitHub automation bot built primarily for the maintainer's own open source project, with an architectural path to evolve into a more general-purpose product. The MVP scope is narrow and concrete: orchestrate ephemeral preview environments for pull requests, triggered by GitHub events (PR open/synchronize/close, labels, comments). Configuration of registered repositories happens through a minimal web panel; system-level configuration is provided once via a config file at install time.
+prout is a self-hosted GitHub automation bot built primarily for the maintainer's own open source project, with an architectural path to evolve into a more general-purpose product. The MVP scope is narrow and concrete: orchestrate ephemeral preview environments for pull requests, triggered by GitHub events (PR open/synchronize/close, labels, comments). Configuration of registered repositories happens through a minimal web panel; system-level configuration is provided once via a config file at install time.
 
 The product takes design inspiration from Probot (lightweight, GitHub-native bot pattern) and Prow (built-in plugin model with config-driven behavior), positioning itself between them: more opinionated than a framework, lighter than a Kubernetes-scale CI system.
 
@@ -41,13 +41,13 @@ The first capability is preview environments. Subsequent capabilities (e.g. agen
                  │ webhooks + API
                  ▼
 ┌────────────────────────────────────────────────────────────────────┐
-│  Toolshed VPS (single host)                                        │
+│  prout VPS (single host)                                        │
 │                                                                    │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │  docker-compose stack                                        │  │
 │  │                                                              │  │
 │  │  ┌──────────┐  ┌────────────────────┐  ┌─────────────────┐   │  │
-│  │  │ Traefik  │  │ Toolshed (Go)      │  │ PostgreSQL 16   │   │  │
+│  │  │ Traefik  │  │ prout (Go)      │  │ PostgreSQL 16   │   │  │
 │  │  │ (proxy,  │  │ - HTTP server      │  │ - state         │   │  │
 │  │  │  TLS)    │  │ - webhook receiver │  │ - River queue   │   │  │
 │  │  │          │  │ - panel (SSR)      │  │ - build logs    │   │  │
@@ -76,19 +76,19 @@ The first capability is preview environments. Subsequent capabilities (e.g. agen
 
 ### Component Interactions
 
-1. **GitHub → Toolshed (webhooks).** PR events, comments, installation events are delivered as signed webhook payloads. The receiver verifies HMAC-SHA256, persists the event, evaluates triggers, and enqueues jobs.
-2. **Toolshed → GitHub (REST API).** The bot reads collaborator permissions, posts/updates PR comments, sets commit status checks, and downloads repository tarballs at specific commit SHAs.
-3. **Browser → Toolshed (panel).** Maintainer signs in via GitHub OAuth, manages registered repositories, edits trigger and lifecycle settings, monitors environments, views live build logs (Server-Sent Events), and triggers manual runtime actions.
-4. **Toolshed → Docker daemon (via socket proxy).** The bot creates networks, builds and runs preview containers, and tears them down through the Docker Engine API. The socket proxy restricts the API surface exposed to the bot.
+1. **GitHub → prout (webhooks).** PR events, comments, installation events are delivered as signed webhook payloads. The receiver verifies HMAC-SHA256, persists the event, evaluates triggers, and enqueues jobs.
+2. **prout → GitHub (REST API).** The bot reads collaborator permissions, posts/updates PR comments, sets commit status checks, and downloads repository tarballs at specific commit SHAs.
+3. **Browser → prout (panel).** Maintainer signs in via GitHub OAuth, manages registered repositories, edits trigger and lifecycle settings, monitors environments, views live build logs (Server-Sent Events), and triggers manual runtime actions.
+4. **prout → Docker daemon (via socket proxy).** The bot creates networks, builds and runs preview containers, and tears them down through the Docker Engine API. The socket proxy restricts the API surface exposed to the bot.
 5. **Traefik → Preview containers.** Traefik discovers preview containers via Docker labels and routes traffic to per-PR subdomains with automatic TLS.
 
 ### Layered Internal Structure
 
-The Toolshed binary is a single Go process organized into layers:
+The prout binary is a single Go process organized into layers:
 
 ```
-toolshed/
-├── cmd/toolshed/                 entry point (HTTP + workers + CLI)
+prout/
+├── cmd/prout/                 entry point (HTTP + workers + CLI)
 ├── internal/
 │   ├── core/
 │   │   ├── webhook/              webhook receiver, signature verification
@@ -151,7 +151,7 @@ The plugin interface in MVP carries a single implementation but is shaped so tha
 | Component | Technology | Rationale |
 |---|---|---|
 | Primary database | **PostgreSQL 16** | State, queue (River), build logs, audit |
-| Workspace storage | **Bind mount** (`/var/lib/toolshed/workspaces`) | Per-build temporary directory, cleaned up after build |
+| Workspace storage | **Bind mount** (`/var/lib/prout/workspaces`) | Per-build temporary directory, cleaned up after build |
 
 ### Observability (MVP scope)
 
@@ -189,17 +189,17 @@ The webhook handler responds within ~100 ms; everything heavy is asynchronous th
 
 ### Database-as-Source-of-Truth for Configuration
 
-Per-repository configuration lives only in PostgreSQL. There is no `.toolshed/preview.yml` or analogous file in target repositories. The web panel writes to the same tables that the runtime reads. Configuration changes apply to subsequent triggers immediately; no rebuild, no deploy.
+Per-repository configuration lives only in PostgreSQL. There is no `.prout/preview.yml` or analogous file in target repositories. The web panel writes to the same tables that the runtime reads. Configuration changes apply to subsequent triggers immediately; no rebuild, no deploy.
 
 This is a deliberate inversion of the original PRD's config-as-code model. It is appropriate for personal use because (a) one operator, (b) git history is not the desired audit log, (c) UI editing is faster for iteration.
 
-The host-level configuration (domain, GitHub App credentials, encryption keys, defaults) lives in `/etc/toolshed/server.yml` plus environment variables and is loaded once at startup. It is intentionally not editable through the panel.
+The host-level configuration (domain, GitHub App credentials, encryption keys, defaults) lives in `/etc/prout/server.yml` plus environment variables and is loaded once at startup. It is intentionally not editable through the panel.
 
 ### Three-Surface Configuration Model
 
 | Surface | Responsibility |
 |---|---|
-| **Server config file** (`/etc/toolshed/server.yml` + env vars) | One-time install: wildcard domain, GitHub App ID/private key, webhook secret, DNS provider credentials, encryption master key, default limits. Edited via SSH only. |
+| **Server config file** (`/etc/prout/server.yml` + env vars) | One-time install: wildcard domain, GitHub App ID/private key, webhook secret, DNS provider credentials, encryption master key, default limits. Edited via SSH only. |
 | **Web panel** | Per-repository configuration: enable/disable, triggers, permissions, lifecycle (TTL, max concurrent), env vars (non-sensitive), exposed service/port, compose file path. Also: dashboard, live logs, manual runtime actions (redeploy, teardown, extend TTL). |
 | **CLI** | Admin operations: `init`, `migrate`, `reconcile`, `env list`, `env destroy`, `logs <pr-number>`. Same backing operations as the panel where applicable, exposed for scripting and SSH workflows. |
 
@@ -215,7 +215,7 @@ Panel sign-in uses GitHub OAuth. A signed-in user's authorization is checked liv
 
 ### 1. Personal-scale product, not OSS-for-the-world
 
-- **Decision:** Treat Toolshed as a tool to support the maintainer's own OSS project, with an opt-in path to broader use later.
+- **Decision:** Treat prout as a tool to support the maintainer's own OSS project, with an opt-in path to broader use later.
 - **Context:** The original PRD targeted a public OSS audience with strict onboarding and DX requirements.
 - **Rationale:** Eliminates ~70% of complexity that existed only to satisfy hypothetical external users (config-as-code in target repos, plugin marketplace, multi-tenant security model, polished onboarding).
 - **Trade-offs:** Some decisions (DB-as-source-of-truth, single-VPS-only) become harder to reverse if the product scope later widens. Architecture is kept clean enough that those reversals are feasible but not free.
@@ -237,7 +237,7 @@ Panel sign-in uses GitHub OAuth. A signed-in user's authorization is checked liv
 ### 4. Configuration in DB, not in target repositories
 
 - **Decision:** Per-repository configuration lives in PostgreSQL and is edited exclusively in the web panel.
-- **Context:** Original PRD specified `.toolshed/preview.yml` in each repo (config-as-code).
+- **Context:** Original PRD specified `.prout/preview.yml` in each repo (config-as-code).
 - **Rationale:** Operator is the maintainer; UI iteration is faster than git roundtrips. Removes the need for `contents: read` on the repo to fetch config, simplifies trust model (no fork-vs-default-branch distinction needed for config), and makes auto-registration on App install meaningful.
 - **Trade-offs:** Loses git as audit log — replaced by an in-app audit table. Loses the "review config in PR" affordance — irrelevant for solo operation. Multi-operator scenarios (future) need explicit conflict handling.
 
@@ -250,16 +250,16 @@ Panel sign-in uses GitHub OAuth. A signed-in user's authorization is checked liv
 
 ### 6. Single VPS, bot and preview environments share the host
 
-- **Decision:** Toolshed and all preview environments run on the same VPS.
+- **Decision:** prout and all preview environments run on the same VPS.
 - **Context:** Preview environments need a public IP, TLS, and Docker access; running them remotely from the bot adds significant orchestration complexity.
 - **Rationale:** Simplest viable topology. Sufficient for personal-scale workloads. Path to multi-host (workers on separate VPSes) is preserved by River's worker-process separation, but unused in MVP.
 - **Trade-offs:** A heavy build can degrade preview-environment performance. Mitigated by `max_concurrent` limits and per-container resource caps (CPU, memory, PIDs) injected at deploy time.
 
 ### 7. Docker socket access via socket proxy
 
-- **Decision:** Toolshed accesses the host Docker daemon through `tecnativa/docker-socket-proxy`, not via direct socket mount.
+- **Decision:** prout accesses the host Docker daemon through `tecnativa/docker-socket-proxy`, not via direct socket mount.
 - **Context:** Docker socket access grants root-equivalent control over the host.
-- **Rationale:** Socket proxy filters the Docker API surface to only what Toolshed needs (containers, networks, images). Defense in depth. Same pattern Traefik uses inside this stack.
+- **Rationale:** Socket proxy filters the Docker API surface to only what prout needs (containers, networks, images). Defense in depth. Same pattern Traefik uses inside this stack.
 - **Trade-offs:** Marginal added complexity (one extra container). Documented requirement: dedicated VPS, not shared with production workloads.
 
 ### 8. Server-side rendered panel, no SPA
@@ -292,14 +292,14 @@ Panel sign-in uses GitHub OAuth. A signed-in user's authorization is checked liv
 
 ### 12. Tarball-based code retrieval
 
-- **Decision:** Toolshed downloads PR head as a tarball via GitHub REST API, not `git clone`.
+- **Decision:** prout downloads PR head as a tarball via GitHub REST API, not `git clone`.
 - **Context:** Preview environments need code at a specific SHA, including from forks.
 - **Rationale:** Atomic (single SHA, no race), lightweight (no `.git` history), works for forks via the same installation token, no SSH key plumbing.
 - **Trade-offs:** No submodules, no LFS. Future fallback to `git clone` is possible but unnecessary in MVP.
 
 ### 13. Compose file sanitization
 
-- **Decision:** Toolshed parses and rejects dangerous constructs in the user-provided compose file before executing it.
+- **Decision:** prout parses and rejects dangerous constructs in the user-provided compose file before executing it.
 - **Context:** Compose can specify host bind mounts, privileged mode, host networking — all container-escape vectors.
 - **Rationale:** Even though the operator is the maintainer, fork PRs can mutate compose files. Hard rejection of: `privileged: true`, `cap_add`, host bind mounts, `pid: host`, `network_mode: host`, `ipc: host`, `devices`. Only named volumes and relative-path volumes within the build context permitted.
 - **Trade-offs:** Some development patterns (host-bind hot reload) are blocked. For MVP, security takes precedence.
@@ -308,7 +308,7 @@ Panel sign-in uses GitHub OAuth. A signed-in user's authorization is checked liv
 
 - **Decision:** Every preview container receives default CPU, memory, and PID limits, regardless of compose file content.
 - **Context:** A fork PR running an accidental fork bomb or busy-loop can crash the host.
-- **Rationale:** Defaults defined in `server.yml`; injected by Toolshed into the generated compose at deploy time. Simple, broadly protective.
+- **Rationale:** Defaults defined in `server.yml`; injected by prout into the generated compose at deploy time. Simple, broadly protective.
 - **Trade-offs:** Some legitimate workloads hit the limits. Operator can adjust defaults globally.
 
 ### 15. Live GitHub permission checks per trigger event
@@ -325,7 +325,7 @@ Panel sign-in uses GitHub OAuth. A signed-in user's authorization is checked liv
 - **Rationale:** Forked PRs require an explicit label or comment trigger initiated by an authorized user, mirroring the model of GitHub Actions' restrictions on `pull_request` events from forks.
 - **Trade-offs:** Maintainers contributing from personal forks must use label/comment triggers. The bot detects this case (PR author has `write+` permission on the base repo) and treats the PR as non-fork for trigger evaluation.
 
-### 17. Build logs in Toolshed (not GitHub)
+### 17. Build logs in prout (not GitHub)
 
 - **Decision:** Build logs are stored in Postgres and served via the panel; not streamed into GitHub Actions or GitHub commit checks.
 - **Context:** Builds happen on the VPS, not on a GitHub runner.
@@ -340,8 +340,8 @@ Panel sign-in uses GitHub OAuth. A signed-in user's authorization is checked liv
 
 ```
 1. Maintainer installs the GitHub App on a repository
-2. GitHub delivers `installation` webhook to Toolshed
-3. Toolshed creates `repositories` row with default config (no triggers, default TTL, default max_concurrent)
+2. GitHub delivers `installation` webhook to prout
+3. prout creates `repositories` row with default config (no triggers, default TTL, default max_concurrent)
 4. Maintainer signs into the panel via GitHub OAuth
 5. New repo appears in the panel with "Configure triggers to enable"
 6. Maintainer fills in: triggers, lifecycle, env vars, compose file path
@@ -352,7 +352,7 @@ Panel sign-in uses GitHub OAuth. A signed-in user's authorization is checked liv
 
 ```
 1.  Contributor opens / updates / labels a PR on GitHub
-2.  Webhook delivered to Toolshed; HMAC-verified; persisted to `webhook_events`
+2.  Webhook delivered to prout; HMAC-verified; persisted to `webhook_events`
 3.  Bot loads the repository's configuration from DB
 4.  Bot evaluates trigger rules (type, label name / command, fork status)
 5.  Bot calls GitHub permissions endpoint for the actor (sender / commenter / PR author)
@@ -362,10 +362,10 @@ Panel sign-in uses GitHub OAuth. A signed-in user's authorization is checked liv
 9.  Bot sets commit status: pending
 10. Worker picks up job:
     a. Downloads tarball at PR head SHA via GitHub API
-    b. Extracts to /var/lib/toolshed/workspaces/{job-id}/
+    b. Extracts to /var/lib/prout/workspaces/{job-id}/
     c. Reads docker-compose.preview.yml from the extract
     d. Sanitizes (rejects forbidden constructs)
-    e. Injects: resource limits, Traefik labels, network, TOOLSHED_* metadata env vars, configured non-sensitive env vars
+    e. Injects: resource limits, Traefik labels, network, prout_* metadata env vars, configured non-sensitive env vars
     f. Streams build output via `docker compose build` to Postgres + SSE channel
     g. Runs `docker compose up -d`
     h. Waits for health
@@ -398,7 +398,7 @@ Panel sign-in uses GitHub OAuth. A signed-in user's authorization is checked liv
 ```
 1. Process starts
 2. Query DB for all environments in state "active"
-3. List Docker containers with Toolshed labels
+3. List Docker containers with prout labels
 4. For DB rows without containers: mark destroyed
 5. For containers without DB rows: stop and remove (orphan cleanup)
 6. For matching pairs: verify health, update if drifted
@@ -410,7 +410,7 @@ Panel sign-in uses GitHub OAuth. A signed-in user's authorization is checked liv
 
 ```
 1. Operator clicks "Redeploy" / "Teardown" / "Extend TTL" in panel,
-   OR runs `toolshed env destroy <id>` from CLI
+   OR runs `prout env destroy <id>` from CLI
 2. Action enqueues an appropriate River job (or updates DB directly for TTL)
 3. Worker performs the action; PR comment updated; status check refreshed
 4. Audit row written
@@ -422,7 +422,7 @@ Panel sign-in uses GitHub OAuth. A signed-in user's authorization is checked liv
 
 ### GitHub App
 
-Toolshed operates as a single GitHub App. All GitHub API access is performed using short-lived installation access tokens generated from the App's private key.
+prout operates as a single GitHub App. All GitHub API access is performed using short-lived installation access tokens generated from the App's private key.
 
 **Required permissions:**
 - `contents: read` — tarball download
@@ -443,7 +443,7 @@ Used only for panel sign-in. Returns the user's identity; authorization is deriv
 
 ### Traefik
 
-Runs as part of the Toolshed compose stack. Uses the Docker provider via the socket proxy, watches container labels, applies routing and TLS automatically. Wildcard certificates via Let's Encrypt DNS-01 challenge.
+Runs as part of the prout compose stack. Uses the Docker provider via the socket proxy, watches container labels, applies routing and TLS automatically. Wildcard certificates via Let's Encrypt DNS-01 challenge.
 
 **Supported DNS providers (MVP):** Cloudflare, AWS Route53.
 
@@ -453,7 +453,7 @@ Accessed exclusively through `tecnativa/docker-socket-proxy`. Operations exposed
 
 ### PostgreSQL
 
-Co-located in the Toolshed compose stack. Holds: state tables, River queue tables, build log lines, audit log, webhook event archive.
+Co-located in the prout compose stack. Holds: state tables, River queue tables, build log lines, audit log, webhook event archive.
 
 ---
 
@@ -472,7 +472,7 @@ Co-located in the Toolshed compose stack. Holds: state tables, River queue table
 
 ### Horizontal scaling (post-MVP)
 
-- **Worker separation:** River supports running workers in a separate process. Toolshed can be split into a webhook/API/panel process and worker processes pulling from the shared queue.
+- **Worker separation:** River supports running workers in a separate process. prout can be split into a webhook/API/panel process and worker processes pulling from the shared queue.
 - **Multi-VPS workers:** Workers on additional hosts pull from the same Postgres. Requires shared image registry or rebuilt-per-host strategy.
 - **Managed Postgres:** External Postgres can replace the co-located instance with no code changes.
 - **Kubernetes target:** The Docker Engine SDK usage is contained behind a small interface; replacing it with a Kubernetes client to deploy preview environments as namespaced resources is the eventual path. Out of scope for MVP.
@@ -529,7 +529,7 @@ Co-located in the Toolshed compose stack. Holds: state tables, River queue table
 ### Build isolation
 
 - Each preview environment runs in its own Docker network.
-- Toolshed control-plane network is `internal: true`.
+- prout control-plane network is `internal: true`.
 - Compose files sanitized: no privileged, no cap_add, no host bind mounts, no host pid/net/ipc, no devices.
 - Resource limits (CPU, memory, PIDs) injected into every container.
 
@@ -542,7 +542,7 @@ Co-located in the Toolshed compose stack. Holds: state tables, River queue table
 ### Data protection
 
 - No application secrets stored in MVP (only non-sensitive env vars).
-- Server-level secrets (GitHub App private key, encryption master key, DNS provider credentials) live in `/etc/toolshed/server.yml` referenced by file path or injected via env vars; never hard-coded, never in DB.
+- Server-level secrets (GitHub App private key, encryption master key, DNS provider credentials) live in `/etc/prout/server.yml` referenced by file path or injected via env vars; never hard-coded, never in DB.
 - Build logs do not include the operator's GitHub OAuth tokens or installation tokens.
 
 ---
