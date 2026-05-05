@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dominikpalatynski/toolshed/internal/config"
+	"github.com/dominikpalatynski/prout/internal/config"
 )
 
 func TestPrepareDomainName(t *testing.T) {

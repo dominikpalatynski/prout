@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/dominikpalatynski/toolshed/internal/github"
+	"github.com/dominikpalatynski/prout/internal/github"
 )
 
 func (s *Server) readyzHandler(w http.ResponseWriter, r *http.Request) {

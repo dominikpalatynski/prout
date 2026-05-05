@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/dominikpalatynski/toolshed/internal/config"
-	"github.com/dominikpalatynski/toolshed/internal/queue"
-	"github.com/dominikpalatynski/toolshed/internal/workspace"
+	"github.com/dominikpalatynski/prout/internal/config"
+	"github.com/dominikpalatynski/prout/internal/queue"
+	"github.com/dominikpalatynski/prout/internal/workspace"
 )
 
 type PullRequestWebhookPayload struct {

@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dominikpalatynski/toolshed/internal/config"
-	"github.com/dominikpalatynski/toolshed/internal/server"
+	"github.com/dominikpalatynski/prout/internal/config"
+	"github.com/dominikpalatynski/prout/internal/server"
 )
 
 var version = "dev"
@@ -24,7 +24,7 @@ func main() {
 
 func root() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "toolshed",
+		Use:     "prout",
 		Short:   "Self-hosted GitHub preview environments",
 		Version: version,
 	}
@@ -53,6 +53,6 @@ func serverCmd() *cobra.Command {
 			return srv.Run(ctx)
 		},
 	}
-	cmd.Flags().StringVar(&configPath, "config", os.Getenv("TOOLSHED_CONFIG"), "path to server.yml")
+	cmd.Flags().StringVar(&configPath, "config", os.Getenv("prout_CONFIG"), "path to server.yml")
 	return cmd
 }
