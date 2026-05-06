@@ -11,12 +11,18 @@ import (
 )
 
 func TestGithubSetupResetRoute(t *testing.T) {
+	tmpls, err := loadTemplates()
+	if err != nil {
+		t.Fatalf("load templates: %v", err)
+	}
+
 	s := &Server{
 		config: &config.Config{
 			Server: config.ServerConfig{
 				AdminSecret: "expected-secret",
 			},
 		},
+		templates: tmpls,
 	}
 
 	r := chi.NewRouter()

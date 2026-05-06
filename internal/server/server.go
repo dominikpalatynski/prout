@@ -23,6 +23,7 @@ type Server struct {
 	workspaceHandler   *workspace.WorkspaceHandler
 	githubClient       *github.GithubClient
 	githubEventHandler *event.GithubEventHandler
+	templates          *templateRegistry
 }
 
 func NewServer(cfg *config.Config) (*Server, error) {
@@ -45,11 +46,17 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("create github event handler: %w", err)
 	}
 
+	templates, err := loadTemplates()
+	if err != nil {
+		return nil, fmt.Errorf("load templates: %w", err)
+	}
+
 	return &Server{
 		config:             cfg,
 		workspaceHandler:   workspaceHandler,
 		githubEventHandler: githubEventHandler,
 		githubClient:       githubClient,
+		templates:          templates,
 	}, nil
 }
 
@@ -104,8 +111,11 @@ func (s *Server) mount(r chi.Router) {
 	r.Use(middleware.Recoverer)
 
 	r.Post("/webhooks/github", s.handleGithubWebhook)
-
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/settings", http.StatusFound)
+	})
 	r.Route("/settings", func(r chi.Router) {
+		r.Get("/", s.settingsIndexHandler)
 		r.Get("/github-setup", s.githubSetupPageHandler)
 		r.Post("/github-setup/start", s.githubSetupStartHandler)
 		r.Get("/github-setup/callback", s.githubSetupCallbackHandler)

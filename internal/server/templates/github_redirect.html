@@ -1,0 +1,26 @@
+{{define "content"}}
+<div style="display:flex;flex-direction:column;align-items:center;gap:24px;margin-top:48px">
+  <div style="position:relative;width:64px;height:64px">
+    <div style="width:64px;height:64px;border-radius:16px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--fg)">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.57.1.78-.25.78-.55v-1.94c-3.2.7-3.87-1.54-3.87-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.74.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.18-3.09-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.18 1.18.92-.26 1.91-.39 2.89-.39.98 0 1.97.13 2.89.39 2.21-1.49 3.18-1.18 3.18-1.18.62 1.58.23 2.75.11 3.04.74.81 1.18 1.83 1.18 3.09 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.13v3.16c0 .31.21.66.79.55 4.57-1.52 7.85-5.83 7.85-10.91C23.5 5.65 18.35.5 12 .5z"/></svg>
+    </div>
+    <svg width="84" height="84" viewBox="0 0 84 84" style="position:absolute;inset:-10px">
+      <circle cx="42" cy="42" r="40" fill="none" stroke="var(--border-faint)" stroke-width="2"/>
+      <circle cx="42" cy="42" r="40" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="60 200" stroke-linecap="round" transform="rotate(-90 42 42)">
+        <animateTransform attributeName="transform" type="rotate" from="-90 42 42" to="270 42 42" dur="1.2s" repeatCount="indefinite"/>
+      </circle>
+    </svg>
+  </div>
+  <div style="text-align:center">
+    <h1 style="font-size:22px;font-weight:600;letter-spacing:-0.022em;margin:0">Redirecting to GitHub…</h1>
+    <p style="font-size:14px;color:var(--fg-muted);margin:6px 0 0;line-height:1.5">
+      Submitting the GitHub App manifest. You'll see GitHub's confirmation screen next.
+    </p>
+  </div>
+</div>
+
+<form id="github-form" action="{{.GitHubURL}}" method="post" style="display:none">
+  <input type="hidden" name="manifest" value="{{.ManifestJSON}}" />
+</form>
+<script>document.getElementById("github-form").submit();</script>
+{{end}}

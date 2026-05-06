@@ -1,0 +1,67 @@
+{{define "content"}}
+<div>
+  <h1 class="page-title" style="font-size:24px">GitHub Setup</h1>
+  <p class="page-lede">Prout is connected to a GitHub App. Pull request events flow into this instance.</p>
+</div>
+
+<div class="card flush">
+  <div class="card-header">
+    <div class="title-row">
+      <div class="icon-tile accent">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.57.1.78-.25.78-.55v-1.94c-3.2.7-3.87-1.54-3.87-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.74.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.18-3.09-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.18 1.18.92-.26 1.91-.39 2.89-.39.98 0 1.97.13 2.89.39 2.21-1.49 3.18-1.18 3.18-1.18.62 1.58.23 2.75.11 3.04.74.81 1.18 1.83 1.18 3.09 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.13v3.16c0 .31.21.66.79.55 4.57-1.52 7.85-5.83 7.85-10.91C23.5 5.65 18.35.5 12 .5z"/></svg>
+      </div>
+      <div class="title-text">
+        <span class="name">{{.AppName}}</span>
+        <span class="sub">github.com/apps/{{.AppSlug}}</span>
+      </div>
+    </div>
+    <span class="pill pill-success"><span class="pill-dot"></span>Connected</span>
+  </div>
+
+  <div class="card-body">
+    <div class="kv"><span class="k">App name</span><span class="v">{{.AppName}}</span></div>
+    <div class="kv"><span class="k">App slug</span><span class="v mono">{{.AppSlug}}</span></div>
+    <div class="kv"><span class="k">App ID</span><span class="v mono">{{.AppID}}</span></div>
+  </div>
+</div>
+
+<div class="danger-card">
+  <div class="danger-title">Danger zone</div>
+  <p class="danger-lede">Resetting will remove the stored app credentials and private key. Webhooks already configured on GitHub will stop being verified.</p>
+
+  <form method="post" action="/settings/github-setup/reset" class="form-stack">
+    <div class="field">
+      <label for="reset_admin_secret">Admin secret</label>
+      <div class="input-shell{{if eq .ErrorField "admin_secret"}} invalid{{end}}">
+        <input type="password" id="reset_admin_secret" name="admin_secret" class="mono" placeholder="Paste admin secret" autocomplete="off" required />
+        <button type="button" class="reveal" data-reveal="reset_admin_secret" aria-label="Show secret">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+      {{if eq .ErrorField "admin_secret"}}<div class="err">{{.ErrorMessage}}</div>{{end}}
+    </div>
+
+    <div class="field">
+      <label for="reset_confirm">Type RESET to confirm</label>
+      <div class="input-shell{{if eq .ErrorField "confirm"}} invalid{{end}}">
+        <input type="text" id="reset_confirm" name="confirm" class="mono" placeholder="RESET" autocomplete="off" required />
+      </div>
+      {{if eq .ErrorField "confirm"}}<div class="err">{{.ErrorMessage}}</div>{{else}}<div class="hint">Case-sensitive.</div>{{end}}
+    </div>
+
+    <div class="row-end">
+      <button class="btn btn-danger-outline" type="submit">Reset GitHub integration</button>
+    </div>
+  </form>
+</div>
+
+<script>
+document.querySelectorAll('[data-reveal]').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var el = document.getElementById(b.getAttribute('data-reveal'));
+    if (!el) return;
+    el.type = el.type === 'password' ? 'text' : 'password';
+  });
+});
+</script>
+{{end}}

@@ -1,0 +1,21 @@
+{{define "content"}}
+<div>
+  <h1 class="page-title">Settings</h1>
+  <p class="page-lede">Configure how Prout watches your repository and provisions preview environments.</p>
+</div>
+
+<div class="section-list">
+  {{range .Items}}
+  <a href="{{.Href}}" class="section-row">
+    <div class="row-text">
+      <div class="row-head">
+        <span class="row-title">{{.Title}}</span>
+        <span class="pill pill-{{.Tone}}"><span class="pill-dot"></span>{{.Status}}</span>
+      </div>
+      <div class="row-desc">{{.Description}}</div>
+    </div>
+    <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+  </a>
+  {{end}}
+</div>
+{{end}}

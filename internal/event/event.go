@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/dominikpalatynski/prout/internal/config"
+	"github.com/dominikpalatynski/prout/internal/github"
 	"github.com/dominikpalatynski/prout/internal/queue"
 	"github.com/dominikpalatynski/prout/internal/workspace"
 )
@@ -45,6 +46,7 @@ type GithubWebhookRequest struct {
 
 type githubWebhookSignatureVerifier interface {
 	VerifyWebhookSignature(body []byte, signatureHeader string) error
+	ValidateRepositoryActionPermission(action github.RepositoryAction, sender string) error
 }
 
 type workspaceHandler interface {
@@ -106,6 +108,9 @@ func (h *GithubEventHandler) HandlePreviewLabeled(payload PullRequestWebhookPayl
 	if payload.Label.Name != "preview" {
 		return fmt.Errorf("unexpected label: %s", payload.Label.Name)
 	}
+	if err := h.signatureVerifier.ValidateRepositoryActionPermission(github.RepositoryActionPreviewLabel, payload.Sender.Login); err != nil {
+		return fmt.Errorf("validate sender permissions: %w", err)
+	}
 
 	h.queue.Run(func() error {
 		return h.workspaceHandler.HandleCreateWorkspace(workspace.WorkspaceLocationBuilder{
@@ -121,6 +126,9 @@ func (h *GithubEventHandler) HandlePreviewLabeled(payload PullRequestWebhookPayl
 func (h *GithubEventHandler) HandlePreviewUnlabeled(payload PullRequestWebhookPayload) error {
 	if payload.Label.Name != "preview" {
 		return fmt.Errorf("unexpected label: %s", payload.Label.Name)
+	}
+	if err := h.signatureVerifier.ValidateRepositoryActionPermission(github.RepositoryActionPreviewUnlabel, payload.Sender.Login); err != nil {
+		return fmt.Errorf("validate sender permissions: %w", err)
 	}
 
 	h.queue.Run(func() error {
