@@ -19,61 +19,6 @@ import (
 	"github.com/dominikpalatynski/prout/internal/config"
 )
 
-func (gh *GithubClient) LoadGithubSetupPage(w http.ResponseWriter, r *http.Request) {
-	//     configured := s.githubConfigExists()
-
-	//     w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	//     if configured {
-	//         _, _ = w.Write([]byte(`
-	// <!doctype html>
-	// <html>
-	//   <head>
-	//     <title>GitHub Setup</title>
-	//   </head>
-	//   <body>
-	//     <h1>GitHub Setup</h1>
-	//     <p><strong>Status:</strong> configured</p>
-
-	//     <hr />
-
-	//     <h2>Danger zone</h2>
-	//     <form method="post" action="/settings/github-setup/reset">
-	//       <label>Admin secret:</label><br />
-	//       <input type="password" name="admin_secret" style="width: 400px;" /><br /><br />
-
-	//       <label>Type RESET to confirm:</label><br />
-	//       <input type="text" name="confirm" /><br /><br />
-
-	//       <button type="submit">Reset GitHub integration</button>
-	//     </form>
-	//   </body>
-	// </html>
-	// `))
-	//         return
-	//     }
-
-	_, _ = w.Write([]byte(`
-<!doctype html>
-<html>
-  <head>
-    <title>GitHub Setup</title>
-  </head>
-  <body>
-    <h1>GitHub Setup</h1>
-    <p><strong>Status:</strong> not configured</p>
-
-    <form method="post" action="/settings/github-setup/start">
-      <label>Admin secret:</label><br />
-      <input type="password" name="admin_secret" style="width: 400px;" /><br /><br />
-
-      <button type="submit">Setup GitHub</button>
-    </form>
-  </body>
-</html>
-`))
-}
-
 type GitHubManifestConversionResponse struct {
 	ID            int64  `json:"id"`
 	Slug          string `json:"slug"`
@@ -81,6 +26,22 @@ type GitHubManifestConversionResponse struct {
 	ClientSecret  string `json:"client_secret"`
 	WebhookSecret string `json:"webhook_secret"`
 	PEM           string `json:"pem"`
+}
+
+type StoredGitHubAppConfig struct {
+	AppID         int64     `json:"app_id"`
+	AppSlug       string    `json:"app_slug"`
+	ClientID      string    `json:"client_id"`
+	ClientSecret  string    `json:"client_secret"`
+	WebhookSecret string    `json:"webhook_secret"`
+	PrivateKeyPEM string    `json:"private_key_pem"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type githubSetupStatePayload struct {
+	Nonce string `json:"nonce"`
+	Exp   int64  `json:"exp"`
+	Kind  string `json:"kind"`
 }
 
 func ConvertGitHubManifestCode(ctx context.Context, code string) (*GitHubManifestConversionResponse, error) {
@@ -116,16 +77,6 @@ func ConvertGitHubManifestCode(ctx context.Context, code string) (*GitHubManifes
 	}
 
 	return &out, nil
-}
-
-type StoredGitHubAppConfig struct {
-	AppID         int64     `json:"app_id"`
-	AppSlug       string    `json:"app_slug"`
-	ClientID      string    `json:"client_id"`
-	ClientSecret  string    `json:"client_secret"`
-	WebhookSecret string    `json:"webhook_secret"`
-	PrivateKeyPEM string    `json:"private_key_pem"`
-	CreatedAt     time.Time `json:"created_at"`
 }
 
 func SaveGitHubAppConfig(app *GitHubManifestConversionResponse) error {
@@ -201,12 +152,6 @@ func VerifySignedSetupState(state string) error {
 	}
 
 	return nil
-}
-
-type githubSetupStatePayload struct {
-	Nonce string `json:"nonce"`
-	Exp   int64  `json:"exp"`
-	Kind  string `json:"kind"`
 }
 
 func CreateSignedSetupState() (string, error) {

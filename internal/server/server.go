@@ -109,6 +109,7 @@ func (s *Server) mount(r chi.Router) {
 		r.Get("/github-setup", s.githubSetupPageHandler)
 		r.Post("/github-setup/start", s.githubSetupStartHandler)
 		r.Get("/github-setup/callback", s.githubSetupCallbackHandler)
+		r.Post("/settings/github-setup/reset", s.githubSetupResetHandler)
 	})
 
 	r.Route("/api", func(r chi.Router) {

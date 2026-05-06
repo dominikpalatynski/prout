@@ -53,7 +53,58 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) githubSetupPageHandler(w http.ResponseWriter, r *http.Request) {
-	s.githubClient.LoadGithubSetupPage(w, r)
+	configured := config.IsGithubAppConfigExists()
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if configured {
+		_, _ = w.Write([]byte(`
+	<!doctype html>
+	<html>
+	  <head>
+	    <title>GitHub Setup</title>
+	  </head>
+	  <body>
+	    <h1>GitHub Setup</h1>
+	    <p><strong>Status:</strong> configured</p>
+
+	    <hr />
+
+	    <h2>Danger zone</h2>
+	    <form method="post" action="/settings/github-setup/reset">
+	      <label>Admin secret:</label><br />
+	      <input type="password" name="admin_secret" style="width: 400px;" /><br /><br />
+
+	      <label>Type RESET to confirm:</label><br />
+	      <input type="text" name="confirm" /><br /><br />
+
+	      <button type="submit">Reset GitHub integration</button>
+	    </form>
+	  </body>
+	</html>
+	`))
+		return
+	}
+
+	_, _ = w.Write([]byte(`
+<!doctype html>
+<html>
+  <head>
+    <title>GitHub Setup</title>
+  </head>
+  <body>
+    <h1>GitHub Setup</h1>
+    <p><strong>Status:</strong> not configured</p>
+
+    <form method="post" action="/settings/github-setup/start">
+      <label>Admin secret:</label><br />
+      <input type="password" name="admin_secret" style="width: 400px;" /><br /><br />
+
+      <button type="submit">Setup GitHub</button>
+    </form>
+  </body>
+</html>
+`))
 }
 
 func (s *Server) githubSetupStartHandler(w http.ResponseWriter, r *http.Request) {
@@ -184,6 +235,41 @@ func (s *Server) githubSetupCallbackHandler(w http.ResponseWriter, r *http.Reque
 	if err := github.SaveGitHubAppConfig(appConfig); err != nil {
 		slog.Error("failed to save github app config", "error", err)
 		http.Error(w, "failed to save github app config", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/settings/github-setup", http.StatusSeeOther)
+}
+
+func (s *Server) githubSetupResetHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+
+	if !s.config.IsValidAdminSecret(r.FormValue("admin_secret")) {
+		http.Error(w, "invalid admin secret", http.StatusForbidden)
+		return
+	}
+
+	if r.FormValue("confirm") != "RESET" {
+		http.Error(w, "reset confirmation is invalid", http.StatusBadRequest)
+		return
+	}
+
+	if !config.IsGithubAppConfigExists() {
+		http.Redirect(w, r, "/settings/github-setup", http.StatusSeeOther)
+		return
+	}
+
+	if err := config.ResetGithubAppConfig(); err != nil {
+		slog.Error("failed to reset github config", "error", err)
+		http.Error(w, "failed to reset github config", http.StatusInternalServerError)
 		return
 	}
 

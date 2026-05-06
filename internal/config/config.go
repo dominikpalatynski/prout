@@ -123,6 +123,18 @@ func SaveGithubAppConfig(c *GithubAppConfig, privateKey string) error {
 	return nil
 }
 
+func ResetGithubAppConfig() error {
+	if err := os.Remove(githubAppConfigPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove github app config: %w", err)
+	}
+
+	if err := os.Remove(privateKeyFilePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove private key file: %w", err)
+	}
+
+	return nil
+}
+
 func ensureFileExists(path string, mode os.FileMode) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
