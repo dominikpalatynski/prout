@@ -18,10 +18,10 @@ import (
 )
 
 type Server struct {
-	config           *config.Config
-	http             *http.Server
-	workspaceHandler *workspace.WorkspaceHandler
-
+	config             *config.Config
+	http               *http.Server
+	workspaceHandler   *workspace.WorkspaceHandler
+	githubClient       *github.GithubClient
 	githubEventHandler *event.GithubEventHandler
 }
 
@@ -43,6 +43,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	return &Server{
 		config:             cfg,
 		githubEventHandler: githubEventHandler,
+		githubClient:       githubClient,
 	}, nil
 }
 
@@ -97,6 +98,13 @@ func (s *Server) mount(r chi.Router) {
 	r.Use(middleware.Recoverer)
 
 	r.Post("/webhooks/github", s.handleGithubWebhook)
+
+	r.Route("/settings", func(r chi.Router) {
+		// protected := r.With(s.requireOperatorBearer)
+		r.Get("/github-setup", s.githubSetupPageHandler)
+		r.Post("/github-setup/start", s.githubSetupStartHandler)
+		r.Get("/github-setup/callback", s.githubSetupCallbackHandler)
+	})
 
 	r.Route("/api", func(r chi.Router) {
 		// protected := r.With(s.requireOperatorBearer)
