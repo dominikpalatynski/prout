@@ -21,6 +21,7 @@ type basePage struct {
 	Title      string
 	Host       string
 	Breadcrumb []breadcrumbItem
+	LogoutHref string
 }
 
 type settingsIndexItem struct {
@@ -34,6 +35,13 @@ type settingsIndexItem struct {
 type settingsIndexData struct {
 	basePage
 	Items []settingsIndexItem
+}
+
+type loginPageData struct {
+	basePage
+	Username     string
+	Next         string
+	ErrorMessage string
 }
 
 type githubEmptyData struct {
@@ -69,6 +77,7 @@ type templateRegistry struct {
 }
 
 var pageTemplates = map[string]string{
+	"login":             "templates/login.html",
 	"settings_index":    "templates/settings_index.html",
 	"github_empty":      "templates/github_empty.html",
 	"github_configured": "templates/github_configured.html",

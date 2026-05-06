@@ -68,6 +68,7 @@ func (s *Server) basePage(title string, breadcrumb []breadcrumbItem) basePage {
 		Title:      title,
 		Host:       s.hostFromBaseURL(),
 		Breadcrumb: breadcrumb,
+		LogoutHref: "/auth/logout",
 	}
 }
 
@@ -104,8 +105,8 @@ func (s *Server) settingsIndexHandler(w http.ResponseWriter, r *http.Request) {
 				Href:        "#",
 			},
 			{
-				Title:       "Admin",
-				Description: "Rotate the admin secret used to access this dashboard.",
+				Title:       "Authentication",
+				Description: "Dashboard username, password and session settings.",
 				Status:      "From server.yml",
 				Tone:        "neutral",
 				Href:        "#",
@@ -203,11 +204,6 @@ func (s *Server) githubSetupStartHandler(w http.ResponseWriter, r *http.Request)
 			"Invalid form submission",
 			"Could not parse the submitted form. Try again.",
 			"HTTP 400", "invalid_form")
-		return
-	}
-
-	if !s.config.IsValidAdminSecret(r.FormValue("admin_secret")) {
-		s.renderEmptyPage(w, http.StatusForbidden, "Admin secret did not match. Check server.yml and try again.")
 		return
 	}
 
@@ -343,14 +339,6 @@ func (s *Server) githubSetupResetHandler(w http.ResponseWriter, r *http.Request)
 			"Invalid form submission",
 			"Could not parse the submitted form. Try again.",
 			"HTTP 400", "invalid_form")
-		return
-	}
-
-	if !s.config.IsValidAdminSecret(r.FormValue("admin_secret")) {
-		s.renderSetupError(w, http.StatusForbidden,
-			"Admin secret did not match",
-			"The submitted admin_secret didn't match the value in server.yml. Go back and try again.",
-			"HTTP 403", "invalid_admin_secret")
 		return
 	}
 

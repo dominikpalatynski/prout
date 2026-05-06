@@ -20,6 +20,12 @@ func defaults() *Config {
 			Level:  "info",
 			Format: "json",
 		},
+		Auth: AuthConfig{
+			SessionSecret: "change-me-session-secret",
+			Username:      "login",
+			Password:      "password",
+			SessionTTL:    "12h",
+		},
 		GitHub: GitHubConfig{
 			APIBaseURL:       "https://api.github.com",
 			APITimeout:       DefaultGitHubAPITimeout,

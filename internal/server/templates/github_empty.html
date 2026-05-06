@@ -16,16 +16,7 @@
   </div>
 
   <form method="post" action="/settings/github-setup/start" class="form-stack">
-    <div class="field">
-      <label for="admin_secret">Admin secret</label>
-      <div class="input-shell{{if .ErrorMessage}} invalid{{end}}">
-        <input type="password" id="admin_secret" name="admin_secret" class="mono" placeholder="Paste admin secret" autocomplete="off" required />
-        <button type="button" class="reveal" data-reveal="admin_secret" aria-label="Show secret">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-        </button>
-      </div>
-      {{if .ErrorMessage}}<div class="err">{{.ErrorMessage}}</div>{{else}}<div class="hint">The admin_secret value from your server.yml. Used to authorize this one-time setup.</div>{{end}}
-    </div>
+    {{if .ErrorMessage}}<div class="err">{{.ErrorMessage}}</div>{{end}}
 
     <div class="info-block">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -40,14 +31,4 @@
     </div>
   </form>
 </div>
-
-<script>
-document.querySelectorAll('[data-reveal]').forEach(function (b) {
-  b.addEventListener('click', function () {
-    var el = document.getElementById(b.getAttribute('data-reveal'));
-    if (!el) return;
-    el.type = el.type === 'password' ? 'text' : 'password';
-  });
-});
-</script>
 {{end}}

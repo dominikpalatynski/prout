@@ -1,0 +1,44 @@
+{{define "content"}}
+<div>
+  <h1 class="page-title" style="font-size:24px">Sign in</h1>
+  <p class="page-lede">Use the dashboard credentials from your <code>server.yml</code> auth section.</p>
+</div>
+
+<div class="card">
+  <form method="post" action="/auth/login" class="form-stack">
+    <input type="hidden" name="next" value="{{.Next}}" />
+
+    <div class="field">
+      <label for="username">Username</label>
+      <div class="input-shell{{if .ErrorMessage}} invalid{{end}}">
+        <input type="text" id="username" name="username" value="{{.Username}}" autocomplete="username" required />
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="password">Password</label>
+      <div class="input-shell{{if .ErrorMessage}} invalid{{end}}">
+        <input type="password" id="password" name="password" autocomplete="current-password" required />
+        <button type="button" class="reveal" data-reveal="password" aria-label="Show password">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+      {{if .ErrorMessage}}<div class="err">{{.ErrorMessage}}</div>{{else}}<div class="hint">A signed cookie keeps the session alive until it expires.</div>{{end}}
+    </div>
+
+    <div class="row-end">
+      <button class="btn btn-primary" type="submit">Sign in</button>
+    </div>
+  </form>
+</div>
+
+<script>
+document.querySelectorAll('[data-reveal]').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var el = document.getElementById(b.getAttribute('data-reveal'));
+    if (!el) return;
+    el.type = el.type === 'password' ? 'text' : 'password';
+  });
+});
+</script>
+{{end}}

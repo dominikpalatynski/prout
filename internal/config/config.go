@@ -20,6 +20,7 @@ const (
 type Config struct {
 	Log         LogConfig         `yaml:"log"`
 	Server      ServerConfig      `yaml:"server"`
+	Auth        AuthConfig        `yaml:"auth"`
 	GitHub      GitHubConfig      `yaml:"github"`
 	Environment EnvironmentConfig `yaml:"environment"`
 }
@@ -45,6 +46,13 @@ type ServerConfig struct {
 	Port        string `yaml:"port"`
 	BaseURL     string `yaml:"base_url"`
 	AdminSecret string `yaml:"admin_secret"`
+}
+
+type AuthConfig struct {
+	SessionSecret string `yaml:"session_secret"`
+	Username      string `yaml:"username"`
+	Password      string `yaml:"password"`
+	SessionTTL    string `yaml:"session_ttl"`
 }
 
 type GitHubConfig struct {

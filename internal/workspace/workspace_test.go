@@ -174,6 +174,49 @@ func TestGenerateTraefikLabelsProductionUsesUniqueRouterAndProxyNetwork(t *testi
 		fmt.Sprintf("traefik.http.routers.%s.entrypoints=websecure", traefikName),
 		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=3000", traefikName),
 		fmt.Sprintf("traefik.http.routers.%s.tls=true", traefikName),
+		fmt.Sprintf("traefik.http.routers.%s.tls.certresolver=letsencrypt", traefikName),
+	}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("generateTraefikLabels() = %v, want %v", got, want)
+	}
+}
+
+func TestGenerateTraefikLabelsPublicDomainUsesTLSOutsideProduction(t *testing.T) {
+	t.Parallel()
+
+	domain := "owner-repo-123-abcdef1.qa.palatynskicloud.com"
+	traefikName := traefikResourceName("app", domain)
+
+	got := generateTraefikLabels("app", domain, config.DevEnvironment, 3000)
+	want := []string{
+		"traefik.enable=true",
+		"traefik.docker.network=proxy",
+		fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s`)", traefikName, domain),
+		fmt.Sprintf("traefik.http.routers.%s.entrypoints=websecure", traefikName),
+		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=3000", traefikName),
+		fmt.Sprintf("traefik.http.routers.%s.tls=true", traefikName),
+		fmt.Sprintf("traefik.http.routers.%s.tls.certresolver=letsencrypt", traefikName),
+	}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("generateTraefikLabels() = %v, want %v", got, want)
+	}
+}
+
+func TestGenerateTraefikLabelsLocalhostDomainStaysOnHTTPOutsideProduction(t *testing.T) {
+	t.Parallel()
+
+	domain := "owner-repo-123-abcdef1.app.localhost"
+	traefikName := traefikResourceName("app", domain)
+
+	got := generateTraefikLabels("app", domain, config.DevEnvironment, 3000)
+	want := []string{
+		"traefik.enable=true",
+		"traefik.docker.network=proxy",
+		fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s`)", traefikName, domain),
+		fmt.Sprintf("traefik.http.routers.%s.entrypoints=web", traefikName),
+		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=3000", traefikName),
 	}
 
 	if !slices.Equal(got, want) {

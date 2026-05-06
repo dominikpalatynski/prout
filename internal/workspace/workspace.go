@@ -150,6 +150,10 @@ func (w *WorkspaceHandler) HandleCreateWorkspace(location WorkspaceLocationBuild
 	return nil
 }
 
+func (w *WorkspaceHandler) ListWorkspaces(locationBuilder WorkspaceLocationBuilder) (string, error) {
+
+}
+
 func (w *WorkspaceHandler) HandleDeleteWorkspace(locationBuilder WorkspaceLocationBuilder) error {
 	location := workspaceFolderPath(locationBuilder)
 
@@ -635,12 +639,11 @@ func mergeTraefikLabels(service map[string]any, serviceName, domain, environment
 
 func generateTraefikLabels(serviceName, domain, environment string, port int) []string {
 	traefikName := traefikResourceName(serviceName, domain)
+	useTLS := shouldUseTLS(domain, environment)
 
-	var webEntrypoint string
-	if environment == config.ProdEnvironment {
+	webEntrypoint := "web"
+	if useTLS {
 		webEntrypoint = "websecure"
-	} else {
-		webEntrypoint = "web"
 	}
 
 	additions := []string{
@@ -651,10 +654,24 @@ func generateTraefikLabels(serviceName, domain, environment string, port int) []
 		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", traefikName, port),
 	}
 
-	if environment == config.ProdEnvironment {
+	if useTLS {
 		additions = append(additions, fmt.Sprintf("traefik.http.routers.%s.tls=true", traefikName))
+		additions = append(additions, fmt.Sprintf("traefik.http.routers.%s.tls.certresolver=letsencrypt", traefikName))
 	}
 	return additions
+}
+
+func shouldUseTLS(domain, environment string) bool {
+	if environment == config.ProdEnvironment {
+		return true
+	}
+
+	normalized := strings.TrimSpace(strings.ToLower(domain))
+	if normalized == "" || normalized == "localhost" {
+		return false
+	}
+
+	return !strings.HasSuffix(normalized, ".localhost")
 }
 
 func traefikResourceName(serviceName, domain string) string {

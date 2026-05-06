@@ -24,18 +24,9 @@
 <div class="card">
   <div style="font-size:14px;font-weight:600;margin-bottom:4px;letter-spacing:-0.005em">Try again</div>
   <p style="font-size:13px;color:var(--fg-muted);margin:0 0 16px;line-height:1.55">
-    Re-enter the admin secret to start a fresh setup flow.
+    Start a fresh setup flow from the current authenticated session.
   </p>
   <form method="post" action="/settings/github-setup/start" class="form-stack">
-    <div class="field">
-      <label for="retry_admin_secret">Admin secret</label>
-      <div class="input-shell">
-        <input type="password" id="retry_admin_secret" name="admin_secret" class="mono" placeholder="Paste admin secret" autocomplete="off" required />
-        <button type="button" class="reveal" data-reveal="retry_admin_secret" aria-label="Show secret">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-        </button>
-      </div>
-    </div>
     <div class="row-between">
       <a class="link-muted" href="/settings"><span class="u">Back to settings</span></a>
       <button class="btn btn-primary" type="submit">
@@ -45,14 +36,4 @@
     </div>
   </form>
 </div>
-
-<script>
-document.querySelectorAll('[data-reveal]').forEach(function (b) {
-  b.addEventListener('click', function () {
-    var el = document.getElementById(b.getAttribute('data-reveal'));
-    if (!el) return;
-    el.type = el.type === 'password' ? 'text' : 'password';
-  });
-});
-</script>
 {{end}}

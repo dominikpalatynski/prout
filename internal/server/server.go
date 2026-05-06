@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/dominikpalatynski/prout/internal/auth"
 	"github.com/dominikpalatynski/prout/internal/config"
 	"github.com/dominikpalatynski/prout/internal/event"
 	"github.com/dominikpalatynski/prout/internal/github"
@@ -20,6 +21,7 @@ import (
 type Server struct {
 	config             *config.Config
 	http               *http.Server
+	authManager        *auth.Manager
 	workspaceHandler   *workspace.WorkspaceHandler
 	githubClient       *github.GithubClient
 	githubEventHandler *event.GithubEventHandler
@@ -29,6 +31,11 @@ type Server struct {
 func NewServer(cfg *config.Config) (*Server, error) {
 	if err := log.Init(); err != nil {
 		return nil, err
+	}
+
+	authManager, err := auth.NewManager(cfg.Auth)
+	if err != nil {
+		return nil, fmt.Errorf("create auth manager: %w", err)
 	}
 
 	githubClient, err := github.NewGithubClient(cfg)
@@ -53,6 +60,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 
 	return &Server{
 		config:             cfg,
+		authManager:        authManager,
 		workspaceHandler:   workspaceHandler,
 		githubEventHandler: githubEventHandler,
 		githubClient:       githubClient,
@@ -110,20 +118,29 @@ func (s *Server) mount(r chi.Router) {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 
+	r.Get("/auth/login", s.authLoginHandler)
+	r.Post("/auth/login", s.authLoginHandler)
+	r.Get("/auth/logout", s.authLogoutHandler)
+	r.Post("/auth/logout", s.authLogoutHandler)
+
 	r.Post("/webhooks/github", s.handleGithubWebhook)
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/settings", http.StatusFound)
-	})
-	r.Route("/settings", func(r chi.Router) {
-		r.Get("/", s.settingsIndexHandler)
-		r.Get("/github-setup", s.githubSetupPageHandler)
-		r.Post("/github-setup/start", s.githubSetupStartHandler)
-		r.Get("/github-setup/callback", s.githubSetupCallbackHandler)
-		r.Post("/github-setup/reset", s.githubSetupResetHandler)
-	})
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/readyz", s.readyzHandler)
 		r.Get("/healthz", s.healthz)
+	})
+
+	r.Group(func(r chi.Router) {
+		r.Use(s.requireValidSession)
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/settings", http.StatusFound)
+		})
+		r.Route("/settings", func(r chi.Router) {
+			r.Get("/", s.settingsIndexHandler)
+			r.Get("/github-setup", s.githubSetupPageHandler)
+			r.Post("/github-setup/start", s.githubSetupStartHandler)
+			r.Get("/github-setup/callback", s.githubSetupCallbackHandler)
+			r.Post("/github-setup/reset", s.githubSetupResetHandler)
+		})
 	})
 }
