@@ -1,4 +1,4 @@
-package workspace
+package github
 
 import (
 	"bytes"
@@ -12,8 +12,13 @@ import (
 	"time"
 )
 
-func (w *WorkspaceHandler) SendPRComment(location WorkspaceLocationBuilder, message string) error {
-	if location.PRNumber <= 0 {
+type GithubCommentPayload struct {
+	PRNumber int
+	SHA      string
+}
+
+func (gh *GithubClient) SendPRComment(ghCommentPayload GithubCommentPayload, message string) error {
+	if ghCommentPayload.PRNumber <= 0 {
 		return fmt.Errorf("pull request number must be positive")
 	}
 	if strings.TrimSpace(message) == "" {
@@ -21,21 +26,21 @@ func (w *WorkspaceHandler) SendPRComment(location WorkspaceLocationBuilder, mess
 	}
 
 	ctx := context.Background()
-	owner := w.cfg.GitHub.Repository.Owner
-	name := w.cfg.GitHub.Repository.Name
+	owner := gh.cfg.GitHub.Repository.Owner
+	name := gh.cfg.GitHub.Repository.Name
 
-	appJWT, err := w.appJWT(time.Now().UTC())
+	appJWT, err := gh.AppJWT(time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("create github app jwt: %w", err)
 	}
 
-	installationID, err := w.getInstallationID(ctx, appJWT, owner, name)
+	installationID, err := gh.GetInstallationID(ctx, appJWT, owner, name)
 	if err != nil {
 		slog.Error("get github installation id", "owner", owner, "repo", name, "error", err)
 		return fmt.Errorf("get github installation id: %w", err)
 	}
 
-	installationToken, err := w.createInstallationToken(ctx, appJWT, installationID)
+	installationToken, err := gh.CreateInstallationToken(ctx, appJWT, installationID)
 	if err != nil {
 		return fmt.Errorf("create github installation token: %w", err)
 	}
@@ -45,9 +50,9 @@ func (w *WorkspaceHandler) SendPRComment(location WorkspaceLocationBuilder, mess
 		return fmt.Errorf("marshal pr comment body: %w", err)
 	}
 
-	req, err := w.newRequest(ctx, http.MethodPost, w.endpointURL(
+	req, err := gh.NewRequest(ctx, http.MethodPost, gh.EndpointURL(
 		fmt.Sprintf("/repos/%s/%s/issues/%d/comments",
-			url.PathEscape(owner), url.PathEscape(name), location.PRNumber),
+			url.PathEscape(owner), url.PathEscape(name), ghCommentPayload.PRNumber),
 	), bytes.NewReader(payload), installationToken)
 	if err != nil {
 		return fmt.Errorf("build pr comment request: %w", err)
@@ -56,10 +61,10 @@ func (w *WorkspaceHandler) SendPRComment(location WorkspaceLocationBuilder, mess
 	var response struct {
 		ID int64 `json:"id"`
 	}
-	if err := w.sendRequest(req, &response); err != nil {
+	if err := gh.SendRequest(req, &response); err != nil {
 		return fmt.Errorf("post pr comment: %w", err)
 	}
 
-	slog.Info("Posted PR comment", "owner", owner, "repo", name, "pr", location.PRNumber, "comment_id", response.ID)
+	slog.Info("Posted PR comment", "owner", owner, "repo", name, "pr", ghCommentPayload.PRNumber, "comment_id", response.ID)
 	return nil
 }

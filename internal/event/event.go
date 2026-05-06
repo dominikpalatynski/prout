@@ -1,10 +1,11 @@
-package github
+package event
 
 import (
 	"fmt"
 	"log/slog"
 
 	"github.com/dominikpalatynski/prout/internal/config"
+	"github.com/dominikpalatynski/prout/internal/github"
 	"github.com/dominikpalatynski/prout/internal/queue"
 	"github.com/dominikpalatynski/prout/internal/workspace"
 )
@@ -43,9 +44,9 @@ type GithubEventHandler struct {
 	queue            *queue.Queue
 }
 
-func NewGithubEventHandler(cfg *config.Config) (*GithubEventHandler, error) {
+func NewGithubEventHandler(cfg *config.Config, githubClient *github.GithubClient) (*GithubEventHandler, error) {
 
-	workspaceHandler, err := workspace.NewWorkspaceHandler(cfg)
+	workspaceHandler, err := workspace.NewWorkspaceHandler(cfg, githubClient)
 	if err != nil {
 		return nil, fmt.Errorf("create workspace handler: %w", err)
 	}

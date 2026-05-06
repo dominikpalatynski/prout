@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dominikpalatynski/prout/internal/config"
+	"github.com/dominikpalatynski/prout/internal/event"
 	"github.com/dominikpalatynski/prout/internal/github"
 	"github.com/dominikpalatynski/prout/internal/log"
 	"github.com/dominikpalatynski/prout/internal/workspace"
@@ -21,7 +22,7 @@ type Server struct {
 	http             *http.Server
 	workspaceHandler *workspace.WorkspaceHandler
 
-	githubEventHandler *github.GithubEventHandler
+	githubEventHandler *event.GithubEventHandler
 }
 
 func NewServer(cfg *config.Config) (*Server, error) {
@@ -29,8 +30,12 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		return nil, err
 	}
 
-	githubEventHandler, err := github.NewGithubEventHandler(cfg)
+	githubClient, err := github.NewGithubClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create github client: %w", err)
+	}
 
+	githubEventHandler, err := event.NewGithubEventHandler(cfg, githubClient)
 	if err != nil {
 		return nil, fmt.Errorf("create github event handler: %w", err)
 	}

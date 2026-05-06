@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/dominikpalatynski/prout/internal/github"
+	"github.com/dominikpalatynski/prout/internal/event"
 )
 
 func (s *Server) readyzHandler(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +27,7 @@ func (s *Server) testDownloadHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
-	var payload github.PullRequestWebhookPayload
+	var payload event.PullRequestWebhookPayload
 
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		slog.Error("failed to decode github webhook payload", "error", err)
