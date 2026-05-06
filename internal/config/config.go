@@ -42,13 +42,12 @@ type LogConfig struct {
 }
 
 type ServerConfig struct {
-	Port string `yaml:"port"`
+	Port        string `yaml:"port"`
+	BaseURL     string `yaml:"base_url"`
+	AdminSecret string `yaml:"admin_secret"`
 }
 
 type GitHubConfig struct {
-	AppID            int64            `yaml:"app_id"`
-	PrivateKeyPath   string           `yaml:"private_key_path"`
-	WebhookSecret    string           `yaml:"webhook_secret"`
 	APIBaseURL       string           `yaml:"api_base_url"`
 	APITimeout       time.Duration    `yaml:"api_timeout"`
 	APIStreamTimeout time.Duration    `yaml:"api_stream_timeout"`
@@ -81,6 +80,10 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	return c, nil
+}
+
+func (c *Config) IsValidAdminSecret(secret string) bool {
+	return c.Server.AdminSecret == secret
 }
 
 func LoadGithubAppConfig() (*GithubAppConfig, error) {
@@ -141,8 +144,8 @@ func ensureFileExists(path string, mode os.FileMode) error {
 	return nil
 }
 
-func LoadPrivateKey(path string) (string, error) {
-	b, err := os.ReadFile(path)
+func LoadPrivateKey() (string, error) {
+	b, err := os.ReadFile(privateKeyFilePath)
 	if err != nil {
 		return "", fmt.Errorf("read private key: %w", err)
 	}

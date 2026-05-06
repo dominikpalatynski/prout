@@ -5,7 +5,6 @@ import (
 	"log/slog"
 
 	"github.com/dominikpalatynski/prout/internal/config"
-	"github.com/dominikpalatynski/prout/internal/github"
 	"github.com/dominikpalatynski/prout/internal/queue"
 	"github.com/dominikpalatynski/prout/internal/workspace"
 )
@@ -38,30 +37,55 @@ type PullRequestWebhookPayload struct {
 	} `json:"installation"`
 }
 
-type GithubEventHandler struct {
-	cfg              *config.Config
-	workspaceHandler *workspace.WorkspaceHandler
-	queue            *queue.Queue
+type GithubWebhookRequest struct {
+	Body      []byte
+	Signature string
+	Payload   PullRequestWebhookPayload
 }
 
-func NewGithubEventHandler(cfg *config.Config, githubClient *github.GithubClient) (*GithubEventHandler, error) {
+type githubWebhookSignatureVerifier interface {
+	VerifyWebhookSignature(body []byte, signatureHeader string) error
+}
 
-	workspaceHandler, err := workspace.NewWorkspaceHandler(cfg, githubClient)
-	if err != nil {
-		return nil, fmt.Errorf("create workspace handler: %w", err)
+type workspaceHandler interface {
+	HandleCreateWorkspace(location workspace.WorkspaceLocationBuilder) error
+	HandleDeleteWorkspace(location workspace.WorkspaceLocationBuilder) error
+}
+
+type GithubEventHandler struct {
+	cfg               *config.Config
+	workspaceHandler  workspaceHandler
+	signatureVerifier githubWebhookSignatureVerifier
+	queue             *queue.Queue
+}
+
+func NewGithubEventHandler(cfg *config.Config, workspaceHandler workspaceHandler, signatureVerifier githubWebhookSignatureVerifier) (*GithubEventHandler, error) {
+	if workspaceHandler == nil {
+		return nil, fmt.Errorf("workspace handler is required")
+	}
+	if signatureVerifier == nil {
+		return nil, fmt.Errorf("github webhook signature verifier is required")
 	}
 
 	q := queue.New(100)
 	q.Start(3)
 
 	return &GithubEventHandler{
-		cfg:              cfg,
-		workspaceHandler: workspaceHandler,
-		queue:            q,
+		cfg:               cfg,
+		workspaceHandler:  workspaceHandler,
+		signatureVerifier: signatureVerifier,
+		queue:             q,
 	}, nil
 }
 
-func (h *GithubEventHandler) HandleGithubEvent(payload PullRequestWebhookPayload) error {
+func (h *GithubEventHandler) HandleGithubEvent(webhook GithubWebhookRequest) error {
+	if err := h.signatureVerifier.VerifyWebhookSignature(webhook.Body, webhook.Signature); err != nil {
+		slog.Error("GitHub webhook signature verification failed", "error", err)
+		return fmt.Errorf("github webhook signature verification failed: %w", err)
+	}
+
+	payload := webhook.Payload
+
 	if fmt.Sprintf("%s/%s", h.cfg.GitHub.Repository.Owner, h.cfg.GitHub.Repository.Name) != payload.Repository.FullName {
 		return fmt.Errorf("unexpected repository: %s", payload.Repository.FullName)
 	}

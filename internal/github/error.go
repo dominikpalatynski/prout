@@ -1,6 +1,14 @@
 package github
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+var (
+	ErrMissingSignature = errors.New("missing X-Hub-Signature-256")
+	ErrInvalidSignature = errors.New("invalid GitHub webhook signature")
+)
 
 type APIError struct {
 	Method     string

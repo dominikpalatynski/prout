@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -17,7 +19,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -27,24 +28,12 @@ import (
 )
 
 type GithubClient struct {
-	cfg        *config.Config
-	privateKey *rsa.PrivateKey
+	cfg *config.Config
 }
 
 func NewGithubClient(cfg *config.Config) (*GithubClient, error) {
-
-	privateKeyData, err := os.ReadFile(cfg.GitHub.PrivateKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("read github app private key: %w", err)
-	}
-
-	privateKey, err := parsePrivateKey(privateKeyData)
-	if err != nil {
-		return nil, fmt.Errorf("parse github app private key: %w", err)
-	}
 	return &GithubClient{
-		cfg:        cfg,
-		privateKey: privateKey,
+		cfg: cfg,
 	}, nil
 }
 
@@ -233,6 +222,22 @@ func (gh *GithubClient) SendRequest(req *http.Request, v any) error {
 }
 
 func (gh *GithubClient) AppJWT(now time.Time) (string, error) {
+
+	rawPrivateKey, err := config.LoadPrivateKey()
+	if err != nil {
+		return "", fmt.Errorf("get github app private key: %w", err)
+	}
+
+	privateKey, err := parsePrivateKey([]byte(rawPrivateKey))
+	if err != nil {
+		return "", fmt.Errorf("parse github app private key: %w", err)
+	}
+
+	githubAppConfig, err := config.LoadGithubAppConfig()
+	if err != nil {
+		return "", fmt.Errorf("load github app config: %w", err)
+	}
+
 	headerJSON, err := json.Marshal(map[string]string{
 		"alg": "RS256",
 		"typ": "JWT",
@@ -244,7 +249,7 @@ func (gh *GithubClient) AppJWT(now time.Time) (string, error) {
 	claimsJSON, err := json.Marshal(map[string]any{
 		"iat": now.Add(-60 * time.Second).Unix(),
 		"exp": now.Add(9 * time.Minute).Unix(),
-		"iss": gh.cfg.GitHub.AppID,
+		"iss": githubAppConfig.AppID,
 	})
 	if err != nil {
 		return "", err
@@ -255,7 +260,7 @@ func (gh *GithubClient) AppJWT(now time.Time) (string, error) {
 	signingInput := header + "." + claims
 
 	digest := sha256.Sum256([]byte(signingInput))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, gh.privateKey, crypto.SHA256, digest[:])
+	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, digest[:])
 	if err != nil {
 		return "", err
 	}
@@ -284,4 +289,46 @@ func (gh *GithubClient) sendStreamRequest(req *http.Request) (io.ReadCloser, err
 	}
 
 	return resp.Body, nil
+}
+
+func (gh *GithubClient) VerifyWebhookSignature(body []byte, signatureHeader string) error {
+	if strings.TrimSpace(signatureHeader) == "" {
+		return ErrMissingSignature
+	}
+
+	githubApp, err := config.LoadGithubAppConfig()
+	if err != nil {
+		return fmt.Errorf("load github app config: %w", err)
+	}
+
+	if strings.TrimSpace(githubApp.WebhookSecret) == "" {
+		return fmt.Errorf("github webhook secret is not configured")
+	}
+
+	if !verifySignatureSHA256(githubApp.WebhookSecret, body, signatureHeader) {
+		return ErrInvalidSignature
+	}
+
+	return nil
+}
+
+func verifySignatureSHA256(secret string, body []byte, signatureHeader string) bool {
+	const prefix = "sha256="
+
+	if !strings.HasPrefix(signatureHeader, prefix) {
+		return false
+	}
+
+	gotHex := strings.TrimPrefix(signatureHeader, prefix)
+
+	gotSig, err := hex.DecodeString(gotHex)
+	if err != nil {
+		return false
+	}
+
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	expectedSig := mac.Sum(nil)
+
+	return hmac.Equal(gotSig, expectedSig)
 }

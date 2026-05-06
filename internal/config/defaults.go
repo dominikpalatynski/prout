@@ -10,7 +10,8 @@ const (
 func defaults() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Port: ":8080",
+			Port:    ":8080",
+			BaseURL: "http://localhost:8080",
 		},
 		Environment: EnvironmentConfig{
 			Name: DevEnvironment,

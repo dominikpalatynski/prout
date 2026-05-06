@@ -35,13 +35,19 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("create github client: %w", err)
 	}
 
-	githubEventHandler, err := event.NewGithubEventHandler(cfg, githubClient)
+	workspaceHandler, err := workspace.NewWorkspaceHandler(cfg, githubClient)
+	if err != nil {
+		return nil, fmt.Errorf("create workspace handler: %w", err)
+	}
+
+	githubEventHandler, err := event.NewGithubEventHandler(cfg, workspaceHandler, githubClient)
 	if err != nil {
 		return nil, fmt.Errorf("create github event handler: %w", err)
 	}
 
 	return &Server{
 		config:             cfg,
+		workspaceHandler:   workspaceHandler,
 		githubEventHandler: githubEventHandler,
 		githubClient:       githubClient,
 	}, nil
@@ -100,16 +106,13 @@ func (s *Server) mount(r chi.Router) {
 	r.Post("/webhooks/github", s.handleGithubWebhook)
 
 	r.Route("/settings", func(r chi.Router) {
-		// protected := r.With(s.requireOperatorBearer)
 		r.Get("/github-setup", s.githubSetupPageHandler)
 		r.Post("/github-setup/start", s.githubSetupStartHandler)
 		r.Get("/github-setup/callback", s.githubSetupCallbackHandler)
 	})
 
 	r.Route("/api", func(r chi.Router) {
-		// protected := r.With(s.requireOperatorBearer)
 		r.Get("/readyz", s.readyzHandler)
 		r.Get("/healthz", s.healthz)
-		r.Post("/test-download", s.testDownloadHandler)
 	})
 }
