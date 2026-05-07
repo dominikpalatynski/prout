@@ -233,3 +233,80 @@ func TestTraefikResourceNameVariesPerDomain(t *testing.T) {
 		t.Fatalf("traefikResourceName() returned the same name for different preview domains: %q", first)
 	}
 }
+
+func TestParseWorkspaceLocation(t *testing.T) {
+	t.Parallel()
+
+	got, err := parseWorkspaceLocation("dominikpalatynski", "test-github-app-12-abcdef1234567890")
+	if err != nil {
+		t.Fatalf("parseWorkspaceLocation() error = %v", err)
+	}
+
+	want := WorkspaceLocationBuilder{
+		FullName: "dominikpalatynski/test-github-app",
+		PRNumber: 12,
+		SHA:      "abcdef1234567890",
+	}
+	if got != want {
+		t.Fatalf("parseWorkspaceLocation() = %+v, want %+v", got, want)
+	}
+}
+
+func TestParseWorkspaceLocationRejectsInvalidDirectory(t *testing.T) {
+	t.Parallel()
+
+	for _, workspaceName := range []string{
+		"",
+		"repo-only",
+		"repo-no-sha-12-",
+		"repo-not-a-number-sha",
+	} {
+		if _, err := parseWorkspaceLocation("dominikpalatynski", workspaceName); err == nil {
+			t.Fatalf("parseWorkspaceLocation(%q) error = nil, want error", workspaceName)
+		}
+	}
+}
+
+func TestSummarizeWorkspaceStatusRunning(t *testing.T) {
+	t.Parallel()
+
+	status, reason := summarizeWorkspaceStatus([]dockerPSContainer{
+		{Names: "workspace-app-1", State: "running", Status: "Up 10 minutes"},
+		{Names: "workspace-db-1", State: "running", Status: "Up 10 minutes"},
+	})
+
+	if status != "running" {
+		t.Fatalf("summarizeWorkspaceStatus() status = %q, want %q", status, "running")
+	}
+	if reason != "2 containers running" {
+		t.Fatalf("summarizeWorkspaceStatus() reason = %q, want %q", reason, "2 containers running")
+	}
+}
+
+func TestSummarizeWorkspaceStatusDegraded(t *testing.T) {
+	t.Parallel()
+
+	status, reason := summarizeWorkspaceStatus([]dockerPSContainer{
+		{Names: "workspace-app-1", State: "running", Status: "Up 10 minutes"},
+		{Names: "workspace-worker-1", State: "exited", Status: "Exited (1) 10 seconds ago"},
+	})
+
+	if status != "degraded" {
+		t.Fatalf("summarizeWorkspaceStatus() status = %q, want %q", status, "degraded")
+	}
+	if reason != "workspace-worker-1=exited" {
+		t.Fatalf("summarizeWorkspaceStatus() reason = %q, want %q", reason, "workspace-worker-1=exited")
+	}
+}
+
+func TestSummarizeWorkspaceStatusStopped(t *testing.T) {
+	t.Parallel()
+
+	status, reason := summarizeWorkspaceStatus(nil)
+	if status != "stopped" {
+		t.Fatalf("summarizeWorkspaceStatus() status = %q, want %q", status, "stopped")
+	}
+	if reason != "no containers found" {
+		t.Fatalf("summarizeWorkspaceStatus() reason = %q, want %q", reason, "no containers found")
+	}
+}

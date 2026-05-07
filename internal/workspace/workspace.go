@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,6 +13,8 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +53,30 @@ type WorkspaceLocationBuilder struct {
 	FullName string
 	PRNumber int
 	SHA      string
+}
+
+type listedWorkspace struct {
+	FullName       string                     `json:"full_name,omitempty"`
+	PRNumber       int                        `json:"pr_number,omitempty"`
+	SHA            string                     `json:"sha,omitempty"`
+	Path           string                     `json:"path"`
+	PullRequestURL string                     `json:"pull_request_url,omitempty"`
+	PreviewURL     string                     `json:"preview_url,omitempty"`
+	Status         string                     `json:"status"`
+	Reason         string                     `json:"reason"`
+	Containers     []listedWorkspaceContainer `json:"containers,omitempty"`
+}
+
+type listedWorkspaceContainer struct {
+	Name   string `json:"name"`
+	State  string `json:"state"`
+	Status string `json:"status"`
+}
+
+type dockerPSContainer struct {
+	Names  string `json:"Names"`
+	State  string `json:"State"`
+	Status string `json:"Status"`
 }
 
 func (e *commandExecutionError) Error() string {
@@ -151,7 +178,98 @@ func (w *WorkspaceHandler) HandleCreateWorkspace(location WorkspaceLocationBuild
 }
 
 func (w *WorkspaceHandler) ListWorkspaces(locationBuilder WorkspaceLocationBuilder) (string, error) {
+	workspaceRoot := filepath.Join(".", "prout", "workspaces")
+	workspacePaths, err := listWorkspacePaths(workspaceRoot)
+	if err != nil {
+		return "", fmt.Errorf("list workspaces: %w", err)
+	}
 
+	workspaces := make([]listedWorkspace, 0, len(workspacePaths))
+	for _, workspacePath := range workspacePaths {
+		workspaceName := filepath.Base(workspacePath)
+		owner := filepath.Base(filepath.Dir(workspacePath))
+
+		location, err := parseWorkspaceLocation(owner, workspaceName)
+		if err != nil {
+			if hasWorkspaceFilters(locationBuilder) {
+				continue
+			}
+
+			workspaces = append(workspaces, listedWorkspace{
+				Path:   workspacePath,
+				Status: "broken",
+				Reason: err.Error(),
+			})
+			continue
+		}
+
+		if !matchesWorkspaceFilter(locationBuilder, location) {
+			continue
+		}
+
+		workspace := listedWorkspace{
+			FullName:       location.FullName,
+			PRNumber:       location.PRNumber,
+			SHA:            location.SHA,
+			Path:           workspacePath,
+			PullRequestURL: pullRequestURL(location),
+		}
+
+		domain, err := w.prepareDomainName(location)
+		if err == nil {
+			workspace.PreviewURL = "http://" + domain
+		}
+
+		composePath := filepath.Join(workspacePath, w.cfg.GitHub.Repository.BuildSettings.DockerComposeFilePath)
+		if strings.TrimSpace(w.cfg.GitHub.Repository.BuildSettings.DockerComposeFilePath) == "" {
+			workspace.Status = "broken"
+			workspace.Reason = "docker compose file path is empty"
+			workspaces = append(workspaces, workspace)
+			continue
+		}
+
+		if _, err := os.Stat(composePath); err != nil {
+			if os.IsNotExist(err) {
+				workspace.Status = "broken"
+				workspace.Reason = "missing compose file"
+				workspaces = append(workspaces, workspace)
+				continue
+			}
+			return "", fmt.Errorf("stat compose file for %s: %w", workspacePath, err)
+		}
+
+		projectName, err := dockerComposeProjectName(location)
+		if err != nil {
+			workspace.Status = "broken"
+			workspace.Reason = err.Error()
+			workspaces = append(workspaces, workspace)
+			continue
+		}
+
+		containers, err := listDockerContainers(projectName)
+		if err != nil {
+			return "", err
+		}
+
+		workspace.Containers = make([]listedWorkspaceContainer, 0, len(containers))
+		for _, container := range containers {
+			workspace.Containers = append(workspace.Containers, listedWorkspaceContainer{
+				Name:   container.Names,
+				State:  normalizedContainerState(container),
+				Status: strings.TrimSpace(container.Status),
+			})
+		}
+
+		workspace.Status, workspace.Reason = summarizeWorkspaceStatus(containers)
+		workspaces = append(workspaces, workspace)
+	}
+
+	payload, err := json.MarshalIndent(workspaces, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal workspace list: %w", err)
+	}
+
+	return string(payload), nil
 }
 
 func (w *WorkspaceHandler) HandleDeleteWorkspace(locationBuilder WorkspaceLocationBuilder) error {
@@ -170,7 +288,9 @@ func (w *WorkspaceHandler) HandleDeleteWorkspace(locationBuilder WorkspaceLocati
 	}
 
 	slog.Info("Workspace deleted successfully", "location", location)
-	w.githubClient.SendPRComment(github.GithubCommentPayload{PRNumber: locationBuilder.PRNumber, SHA: locationBuilder.SHA}, "🚀 Workspace deleted successfully")
+	if w.githubClient != nil {
+		w.githubClient.SendPRComment(github.GithubCommentPayload{PRNumber: locationBuilder.PRNumber, SHA: locationBuilder.SHA}, "🚀 Workspace deleted successfully")
+	}
 	return nil
 }
 
@@ -190,6 +310,185 @@ func workspaceFolderPath(locationBuilder WorkspaceLocationBuilder) string {
 		"workspaces",
 		fmt.Sprintf("%s-%d-%s", locationBuilder.FullName, locationBuilder.PRNumber, locationBuilder.SHA),
 	)
+}
+
+func listWorkspacePaths(root string) ([]string, error) {
+	owners, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	paths := make([]string, 0)
+	for _, owner := range owners {
+		if !owner.IsDir() {
+			continue
+		}
+
+		ownerPath := filepath.Join(root, owner.Name())
+		workspaces, err := os.ReadDir(ownerPath)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, workspace := range workspaces {
+			if !workspace.IsDir() {
+				continue
+			}
+
+			paths = append(paths, filepath.Join(ownerPath, workspace.Name()))
+		}
+	}
+
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func parseWorkspaceLocation(owner, workspaceName string) (WorkspaceLocationBuilder, error) {
+	trimmedOwner := strings.TrimSpace(owner)
+	if trimmedOwner == "" {
+		return WorkspaceLocationBuilder{}, fmt.Errorf("workspace owner is required")
+	}
+
+	trimmedName := strings.TrimSpace(workspaceName)
+	if trimmedName == "" {
+		return WorkspaceLocationBuilder{}, fmt.Errorf("workspace directory name is required")
+	}
+
+	shaIndex := strings.LastIndex(trimmedName, "-")
+	if shaIndex <= 0 || shaIndex == len(trimmedName)-1 {
+		return WorkspaceLocationBuilder{}, fmt.Errorf("invalid workspace directory name %q", workspaceName)
+	}
+
+	sha := trimmedName[shaIndex+1:]
+	repoAndPR := trimmedName[:shaIndex]
+
+	prIndex := strings.LastIndex(repoAndPR, "-")
+	if prIndex <= 0 || prIndex == len(repoAndPR)-1 {
+		return WorkspaceLocationBuilder{}, fmt.Errorf("invalid workspace directory name %q", workspaceName)
+	}
+
+	prNumber, err := strconv.Atoi(repoAndPR[prIndex+1:])
+	if err != nil || prNumber <= 0 {
+		return WorkspaceLocationBuilder{}, fmt.Errorf("invalid workspace directory name %q", workspaceName)
+	}
+
+	repoName := strings.TrimSpace(repoAndPR[:prIndex])
+	if repoName == "" {
+		return WorkspaceLocationBuilder{}, fmt.Errorf("invalid workspace directory name %q", workspaceName)
+	}
+
+	return WorkspaceLocationBuilder{
+		FullName: trimmedOwner + "/" + repoName,
+		PRNumber: prNumber,
+		SHA:      sha,
+	}, nil
+}
+
+func hasWorkspaceFilters(locationBuilder WorkspaceLocationBuilder) bool {
+	return strings.TrimSpace(locationBuilder.FullName) != "" || locationBuilder.PRNumber > 0 || strings.TrimSpace(locationBuilder.SHA) != ""
+}
+
+func matchesWorkspaceFilter(filter, location WorkspaceLocationBuilder) bool {
+	if fullName := strings.TrimSpace(filter.FullName); fullName != "" && location.FullName != fullName {
+		return false
+	}
+	if filter.PRNumber > 0 && location.PRNumber != filter.PRNumber {
+		return false
+	}
+	if sha := strings.TrimSpace(filter.SHA); sha != "" && location.SHA != sha {
+		return false
+	}
+	return true
+}
+
+func pullRequestURL(locationBuilder WorkspaceLocationBuilder) string {
+	return fmt.Sprintf("https://github.com/%s/pull/%d", locationBuilder.FullName, locationBuilder.PRNumber)
+}
+
+func listDockerContainers(projectName string) ([]dockerPSContainer, error) {
+	args := []string{
+		"ps",
+		"-a",
+		"--filter",
+		fmt.Sprintf("label=com.docker.compose.project=%s", projectName),
+		"--format",
+		"{{json .}}",
+	}
+
+	output, err := exec.Command("docker", args...).CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			return nil, fmt.Errorf("list docker containers for project %q: %w", projectName, err)
+		}
+		return nil, fmt.Errorf("list docker containers for project %q: %w: %s", projectName, err, message)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	containers := make([]dockerPSContainer, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		var container dockerPSContainer
+		if err := json.Unmarshal([]byte(line), &container); err != nil {
+			return nil, fmt.Errorf("decode docker ps output for project %q: %w", projectName, err)
+		}
+		containers = append(containers, container)
+	}
+
+	return containers, nil
+}
+
+func summarizeWorkspaceStatus(containers []dockerPSContainer) (string, string) {
+	if len(containers) == 0 {
+		return "stopped", "no containers found"
+	}
+
+	nonRunning := make([]string, 0)
+	for _, container := range containers {
+		if containerIsRunning(container) {
+			continue
+		}
+
+		name := strings.TrimSpace(container.Names)
+		if name == "" {
+			name = "unknown"
+		}
+		nonRunning = append(nonRunning, fmt.Sprintf("%s=%s", name, normalizedContainerState(container)))
+	}
+
+	if len(nonRunning) == 0 {
+		return "running", fmt.Sprintf("%d containers running", len(containers))
+	}
+
+	sort.Strings(nonRunning)
+	return "degraded", strings.Join(nonRunning, ", ")
+}
+
+func containerIsRunning(container dockerPSContainer) bool {
+	return normalizedContainerState(container) == "running"
+}
+
+func normalizedContainerState(container dockerPSContainer) string {
+	if state := strings.TrimSpace(strings.ToLower(container.State)); state != "" {
+		return state
+	}
+
+	status := strings.TrimSpace(strings.ToLower(container.Status))
+	switch {
+	case strings.HasPrefix(status, "up"):
+		return "running"
+	case strings.HasPrefix(status, "exited"):
+		return "exited"
+	default:
+		return "unknown"
+	}
 }
 
 func (w *WorkspaceHandler) extractTarball(stagingPath string, body io.Reader) error {

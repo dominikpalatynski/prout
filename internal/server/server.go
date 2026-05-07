@@ -135,12 +135,16 @@ func (s *Server) mount(r chi.Router) {
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/settings", http.StatusFound)
 		})
+		r.Get("/workspaces", s.workspacesPageHandler)
+		r.Post("/workspaces/delete", s.deleteWorkspaceHandler)
 		r.Route("/settings", func(r chi.Router) {
 			r.Get("/", s.settingsIndexHandler)
 			r.Get("/github-setup", s.githubSetupPageHandler)
 			r.Post("/github-setup/start", s.githubSetupStartHandler)
 			r.Get("/github-setup/callback", s.githubSetupCallbackHandler)
 			r.Post("/github-setup/reset", s.githubSetupResetHandler)
+			r.Get("/workspaces", s.workspacesPageHandler)
+			r.Post("/workspaces/delete", s.deleteWorkspaceHandler)
 		})
 	})
 }

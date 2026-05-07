@@ -18,10 +18,11 @@ type breadcrumbItem struct {
 }
 
 type basePage struct {
-	Title      string
-	Host       string
-	Breadcrumb []breadcrumbItem
-	LogoutHref string
+	Title        string
+	Host         string
+	Breadcrumb   []breadcrumbItem
+	LogoutHref   string
+	ContentClass string
 }
 
 type settingsIndexItem struct {
@@ -72,6 +73,33 @@ type githubRedirectData struct {
 	ManifestJSON string
 }
 
+type workspaceListPageData struct {
+	basePage
+	ErrorMessage   string
+	SuccessMessage string
+	Workspaces     []workspaceRowData
+}
+
+type workspaceRowData struct {
+	FullName       string `json:"full_name"`
+	PRNumber       int    `json:"pr_number"`
+	SHA            string `json:"sha"`
+	Path           string `json:"path"`
+	PullRequestURL string `json:"pull_request_url"`
+	PreviewURL     string `json:"preview_url"`
+	Status         string `json:"status"`
+	StatusTone     string
+	Reason         string `json:"reason"`
+	ContainerCount int
+	Containers     []workspaceContainerData `json:"containers"`
+}
+
+type workspaceContainerData struct {
+	Name   string `json:"name"`
+	State  string `json:"state"`
+	Status string `json:"status"`
+}
+
 type templateRegistry struct {
 	tmpls map[string]*template.Template
 }
@@ -79,6 +107,7 @@ type templateRegistry struct {
 var pageTemplates = map[string]string{
 	"login":             "templates/login.html",
 	"settings_index":    "templates/settings_index.html",
+	"workspaces":        "templates/workspaces.html",
 	"github_empty":      "templates/github_empty.html",
 	"github_configured": "templates/github_configured.html",
 	"github_error":      "templates/github_error.html",

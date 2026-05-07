@@ -36,3 +36,5 @@ server.yml
 .private-keys/
 .prout/
 .cache/
+app_config/
+prout

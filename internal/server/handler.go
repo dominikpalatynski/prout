@@ -7,11 +7,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/dominikpalatynski/prout/internal/config"
 	"github.com/dominikpalatynski/prout/internal/event"
 	"github.com/dominikpalatynski/prout/internal/github"
+	"github.com/dominikpalatynski/prout/internal/workspace"
 )
 
 func (s *Server) readyzHandler(w http.ResponseWriter, r *http.Request) {
@@ -89,6 +91,13 @@ func (s *Server) settingsIndexHandler(w http.ResponseWriter, r *http.Request) {
 	data := settingsIndexData{
 		basePage: s.basePage("Prout · Settings", []breadcrumbItem{{Label: "settings"}}),
 		Items: []settingsIndexItem{
+			{
+				Title:       "Workspaces",
+				Description: "Browse preview environments, PR links and runtime status.",
+				Status:      "Open dashboard",
+				Tone:        "neutral",
+				Href:        "/workspaces",
+			},
 			githubItem,
 			{
 				Title:       "Repository",
@@ -114,6 +123,123 @@ func (s *Server) settingsIndexHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	s.templates.render(w, http.StatusOK, "settings_index", data)
+}
+
+func (s *Server) workspacesPageHandler(w http.ResponseWriter, r *http.Request) {
+	data := workspaceListPageData{
+		basePage: basePage{
+			Title:        "Prout · Workspaces",
+			Host:         s.hostFromBaseURL(),
+			Breadcrumb:   []breadcrumbItem{{Label: "workspaces"}},
+			LogoutHref:   "/auth/logout",
+			ContentClass: "wide",
+		},
+	}
+
+	data.ErrorMessage = workspaceErrorMessage(r.URL.Query().Get("error"))
+	data.SuccessMessage = workspaceSuccessMessage(r.URL.Query().Get("success"))
+
+	if s.workspaceHandler == nil {
+		data.ErrorMessage = "Workspace handler is not configured."
+		s.templates.render(w, http.StatusInternalServerError, "workspaces", data)
+		return
+	}
+
+	raw, err := s.workspaceHandler.ListWorkspaces(workspace.WorkspaceLocationBuilder{})
+	if err != nil {
+		slog.Error("failed to list workspaces", "error", err)
+		data.ErrorMessage = err.Error()
+		s.templates.render(w, http.StatusInternalServerError, "workspaces", data)
+		return
+	}
+
+	if strings.TrimSpace(raw) != "" {
+		if err := json.Unmarshal([]byte(raw), &data.Workspaces); err != nil {
+			slog.Error("failed to decode workspace list", "error", err)
+			data.ErrorMessage = "Failed to decode workspace list."
+			s.templates.render(w, http.StatusInternalServerError, "workspaces", data)
+			return
+		}
+	}
+
+	for i := range data.Workspaces {
+		data.Workspaces[i].StatusTone = workspaceStatusTone(data.Workspaces[i].Status)
+		data.Workspaces[i].ContainerCount = len(data.Workspaces[i].Containers)
+	}
+
+	s.templates.render(w, http.StatusOK, "workspaces", data)
+}
+
+func (s *Server) deleteWorkspaceHandler(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, "/workspaces?error=invalid_delete_request", http.StatusSeeOther)
+		return
+	}
+
+	prNumber, err := strconv.Atoi(strings.TrimSpace(r.FormValue("pr_number")))
+	if err != nil || prNumber <= 0 {
+		http.Redirect(w, r, "/workspaces?error=invalid_delete_request", http.StatusSeeOther)
+		return
+	}
+
+	location := workspace.WorkspaceLocationBuilder{
+		FullName: strings.TrimSpace(r.FormValue("full_name")),
+		PRNumber: prNumber,
+		SHA:      strings.TrimSpace(r.FormValue("sha")),
+	}
+
+	if strings.TrimSpace(location.FullName) == "" || strings.TrimSpace(location.SHA) == "" {
+		http.Redirect(w, r, "/workspaces?error=invalid_delete_request", http.StatusSeeOther)
+		return
+	}
+
+	if s.workspaceHandler == nil {
+		http.Redirect(w, r, "/workspaces?error=workspace_handler_missing", http.StatusSeeOther)
+		return
+	}
+
+	if err := s.workspaceHandler.HandleDeleteWorkspace(location); err != nil {
+		slog.Error("failed to delete workspace", "full_name", location.FullName, "pr_number", location.PRNumber, "sha", location.SHA, "error", err)
+		http.Redirect(w, r, "/workspaces?error=delete_failed", http.StatusSeeOther)
+		return
+	}
+
+	http.Redirect(w, r, "/workspaces?success=workspace_deleted", http.StatusSeeOther)
+}
+
+func workspaceStatusTone(status string) string {
+	switch strings.TrimSpace(strings.ToLower(status)) {
+	case "running":
+		return "success"
+	case "degraded":
+		return "warning"
+	case "broken":
+		return "danger"
+	default:
+		return "neutral"
+	}
+}
+
+func workspaceErrorMessage(code string) string {
+	switch strings.TrimSpace(strings.ToLower(code)) {
+	case "invalid_delete_request":
+		return "The delete request was invalid. Try again from the workspace table."
+	case "workspace_handler_missing":
+		return "Workspace handler is not configured."
+	case "delete_failed":
+		return "Workspace deletion failed. Check server logs for details."
+	default:
+		return ""
+	}
+}
+
+func workspaceSuccessMessage(code string) string {
+	switch strings.TrimSpace(strings.ToLower(code)) {
+	case "workspace_deleted":
+		return "Workspace deleted successfully."
+	default:
+		return ""
+	}
 }
 
 func (s *Server) setupBreadcrumb() []breadcrumbItem {
