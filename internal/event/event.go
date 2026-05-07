@@ -45,8 +45,8 @@ type GithubWebhookRequest struct {
 }
 
 type githubWebhookSignatureVerifier interface {
-	VerifyWebhookSignature(body []byte, signatureHeader string) error
-	ValidateRepositoryActionPermission(action github.RepositoryAction, sender string) error
+	VerifyWebhookSignature(cfg *config.Config, body []byte, signatureHeader string) error
+	ValidateRepositoryActionPermission(cfg *config.Config, action github.RepositoryAction, sender string) error
 }
 
 type workspaceHandler interface {
@@ -81,7 +81,7 @@ func NewGithubEventHandler(cfg *config.Config, workspaceHandler workspaceHandler
 }
 
 func (h *GithubEventHandler) HandleGithubEvent(webhook GithubWebhookRequest) error {
-	if err := h.signatureVerifier.VerifyWebhookSignature(webhook.Body, webhook.Signature); err != nil {
+	if err := h.signatureVerifier.VerifyWebhookSignature(h.cfg, webhook.Body, webhook.Signature); err != nil {
 		slog.Error("GitHub webhook signature verification failed", "error", err)
 		return fmt.Errorf("github webhook signature verification failed: %w", err)
 	}
@@ -108,7 +108,7 @@ func (h *GithubEventHandler) HandlePreviewLabeled(payload PullRequestWebhookPayl
 	if payload.Label.Name != "preview" {
 		return fmt.Errorf("unexpected label: %s", payload.Label.Name)
 	}
-	if err := h.signatureVerifier.ValidateRepositoryActionPermission(github.RepositoryActionPreviewLabel, payload.Sender.Login); err != nil {
+	if err := h.signatureVerifier.ValidateRepositoryActionPermission(h.cfg, github.RepositoryActionPreviewLabel, payload.Sender.Login); err != nil {
 		return fmt.Errorf("validate sender permissions: %w", err)
 	}
 
@@ -127,7 +127,7 @@ func (h *GithubEventHandler) HandlePreviewUnlabeled(payload PullRequestWebhookPa
 	if payload.Label.Name != "preview" {
 		return fmt.Errorf("unexpected label: %s", payload.Label.Name)
 	}
-	if err := h.signatureVerifier.ValidateRepositoryActionPermission(github.RepositoryActionPreviewUnlabel, payload.Sender.Login); err != nil {
+	if err := h.signatureVerifier.ValidateRepositoryActionPermission(h.cfg, github.RepositoryActionPreviewUnlabel, payload.Sender.Login); err != nil {
 		return fmt.Errorf("validate sender permissions: %w", err)
 	}
 

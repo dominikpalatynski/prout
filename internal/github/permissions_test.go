@@ -1,6 +1,10 @@
 package github
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/dominikpalatynski/prout/internal/config"
+)
 
 func TestValidateRepositoryPermission(t *testing.T) {
 	t.Parallel()
@@ -46,7 +50,7 @@ func TestValidateRepositoryPermission(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := ValidateRepositoryPermission(tt.action, tt.role)
+			err := ValidateRepositoryPermission(&config.Config{}, tt.action, tt.role)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("ValidateRepositoryPermission() error = %v", err)

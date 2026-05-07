@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/dominikpalatynski/prout/internal/config"
 )
 
 type RepositoryAction string
@@ -38,6 +40,7 @@ var repositoryRolePriority = map[RepositoryRole]int{
 }
 
 func ValidateRepositoryPermission(action RepositoryAction, role RepositoryRole) error {
+
 	requiredRole, err := minimumRepositoryRole(action)
 	if err != nil {
 		return err
@@ -55,7 +58,13 @@ func ValidateRepositoryPermission(action RepositoryAction, role RepositoryRole) 
 	return nil
 }
 
-func (gh *GithubClient) ValidateRepositoryActionPermission(action RepositoryAction, sender string) error {
+func (gh *GithubClient) ValidateRepositoryActionPermission(cfg *config.Config, action RepositoryAction, sender string) error {
+
+	if cfg.Environment.Name == config.DevEnvironment {
+		// Skip permission validation in development environment for easier testing and iteration.
+		return nil
+	}
+
 	role, err := gh.GetRepositoryRole(context.Background(), sender)
 	if err != nil {
 		return fmt.Errorf("get repository role for %q: %w", sender, err)

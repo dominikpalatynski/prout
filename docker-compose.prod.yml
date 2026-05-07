@@ -1,4 +1,29 @@
 services:
+  prout:
+    image: ghcr.io/dominikpalatynski/prout:0.0.1
+    container_name: prout
+    restart: unless-stopped
+    stop_grace_period: 35s
+    working_dir: /opt/prout
+    command:
+      - server
+      - --config
+      - /opt/prout/server.yml
+    ports:
+      - "8090:8090"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/prout:/opt/prout
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.prout.rule=Host(`<your-domain-here>)"
+      - "traefik.http.routers.prout.entrypoints=websecure"
+      - "traefik.http.routers.prout.tls=true"
+      - "traefik.http.routers.prout.tls.certresolver=letsencrypt"
+      - "traefik.http.services.prout.loadbalancer.server.port=8090"
+    networks:
+      - proxy
   traefik:
     image: traefik:v3.5
     container_name: traefik

@@ -291,7 +291,12 @@ func (gh *GithubClient) sendStreamRequest(req *http.Request) (io.ReadCloser, err
 	return resp.Body, nil
 }
 
-func (gh *GithubClient) VerifyWebhookSignature(body []byte, signatureHeader string) error {
+func (gh *GithubClient) VerifyWebhookSignature(cfg *config.Config, body []byte, signatureHeader string) error {
+	if cfg.Environment.Name == config.DevEnvironment {
+		// Skip permission validation in development environment for easier testing and iteration.
+		return nil
+	}
+
 	if strings.TrimSpace(signatureHeader) == "" {
 		return ErrMissingSignature
 	}

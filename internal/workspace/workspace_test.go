@@ -163,7 +163,7 @@ func TestCommandExecutionErrorIncludesTail(t *testing.T) {
 func TestGenerateTraefikLabelsProductionUsesUniqueRouterAndProxyNetwork(t *testing.T) {
 	t.Parallel()
 
-	domain := "owner-repo-123-abcdef1.qa.palatynskicloud.com"
+	domain := "owner-repo-123-abcdef1.qa.test.com"
 	traefikName := traefikResourceName("app", domain)
 
 	got := generateTraefikLabels("app", domain, config.ProdEnvironment, 3000)
@@ -185,7 +185,7 @@ func TestGenerateTraefikLabelsProductionUsesUniqueRouterAndProxyNetwork(t *testi
 func TestGenerateTraefikLabelsPublicDomainUsesTLSOutsideProduction(t *testing.T) {
 	t.Parallel()
 
-	domain := "owner-repo-123-abcdef1.qa.palatynskicloud.com"
+	domain := "owner-repo-123-abcdef1.qa.test.com"
 	traefikName := traefikResourceName("app", domain)
 
 	got := generateTraefikLabels("app", domain, config.DevEnvironment, 3000)
@@ -227,8 +227,8 @@ func TestGenerateTraefikLabelsLocalhostDomainStaysOnHTTPOutsideProduction(t *tes
 func TestTraefikResourceNameVariesPerDomain(t *testing.T) {
 	t.Parallel()
 
-	first := traefikResourceName("app", "owner-repo-10-abcdef1.qa.palatynskicloud.com")
-	second := traefikResourceName("app", "owner-repo-11-fedcba1.qa.palatynskicloud.com")
+	first := traefikResourceName("app", "owner-repo-10-abcdef1.qa.test.com")
+	second := traefikResourceName("app", "owner-repo-11-fedcba1.qa.test.com")
 	if first == second {
 		t.Fatalf("traefikResourceName() returned the same name for different preview domains: %q", first)
 	}

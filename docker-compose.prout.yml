@@ -1,0 +1,19 @@
+services:
+  prout:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: prout:local
+    container_name: prout
+    restart: unless-stopped
+    stop_grace_period: 35s
+    working_dir: /opt/prout
+    command:
+      - server
+      - --config
+      - /opt/prout/server.yml
+    ports:
+      - "8090:8090"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/opt/prout

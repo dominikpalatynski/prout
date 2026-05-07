@@ -1,0 +1,13 @@
+.git
+.gitignore
+.agents
+.ai
+.claude
+.cache
+.DS_Store
+.env
+.private-keys
+app_config
+bin
+prout
+server.yml
