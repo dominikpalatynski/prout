@@ -3,6 +3,7 @@ package workspace
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -308,5 +309,191 @@ func TestSummarizeWorkspaceStatusStopped(t *testing.T) {
 	}
 	if reason != "no containers found" {
 		t.Fatalf("summarizeWorkspaceStatus() reason = %q, want %q", reason, "no containers found")
+	}
+}
+
+func TestPreserveContainerNameAsAlias(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		service map[string]any
+		want    any
+	}{
+		{
+			name: "list of any",
+			service: map[string]any{
+				"container_name": "mercato-postgres-local",
+				"networks":       []any{"mercato-network-fullapp"},
+			},
+			want: map[string]any{
+				"mercato-network-fullapp": map[string]any{"aliases": []any{"mercato-postgres-local"}},
+			},
+		},
+		{
+			name: "list of strings",
+			service: map[string]any{
+				"container_name": "mercato-redis-local",
+				"networks":       []string{"mercato-network-fullapp"},
+			},
+			want: map[string]any{
+				"mercato-network-fullapp": map[string]any{"aliases": []any{"mercato-redis-local"}},
+			},
+		},
+		{
+			name: "map with nil cfg",
+			service: map[string]any{
+				"container_name": "x",
+				"networks":       map[string]any{"foo": nil},
+			},
+			want: map[string]any{
+				"foo": map[string]any{"aliases": []any{"x"}},
+			},
+		},
+		{
+			name: "map with existing cfg without aliases",
+			service: map[string]any{
+				"container_name": "x",
+				"networks":       map[string]any{"foo": map[string]any{"priority": 10}},
+			},
+			want: map[string]any{
+				"foo": map[string]any{"priority": 10, "aliases": []any{"x"}},
+			},
+		},
+		{
+			name: "map with existing aliases",
+			service: map[string]any{
+				"container_name": "x",
+				"networks":       map[string]any{"foo": map[string]any{"aliases": []any{"bar"}}},
+			},
+			want: map[string]any{
+				"foo": map[string]any{"aliases": []any{"bar", "x"}},
+			},
+		},
+		{
+			name: "alias already present is not duplicated",
+			service: map[string]any{
+				"container_name": "x",
+				"networks":       map[string]any{"foo": map[string]any{"aliases": []any{"x"}}},
+			},
+			want: map[string]any{
+				"foo": map[string]any{"aliases": []any{"x"}},
+			},
+		},
+		{
+			name: "proxy network skipped in list",
+			service: map[string]any{
+				"container_name": "x",
+				"networks":       []any{"proxy", "foo"},
+			},
+			want: map[string]any{
+				"proxy": map[string]any{},
+				"foo":   map[string]any{"aliases": []any{"x"}},
+			},
+		},
+		{
+			name: "proxy network skipped in map",
+			service: map[string]any{
+				"container_name": "x",
+				"networks":       map[string]any{"proxy": map[string]any{}, "foo": nil},
+			},
+			want: map[string]any{
+				"proxy": map[string]any{},
+				"foo":   map[string]any{"aliases": []any{"x"}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			preserveContainerNameAsAlias(tt.service)
+			got := tt.service["networks"]
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("networks = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPreserveContainerNameAsAliasNoOps(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		service map[string]any
+	}{
+		{
+			name:    "no container_name",
+			service: map[string]any{"networks": []any{"foo"}},
+		},
+		{
+			name:    "empty container_name",
+			service: map[string]any{"container_name": "   ", "networks": []any{"foo"}},
+		},
+		{
+			name:    "nil networks",
+			service: map[string]any{"container_name": "x"},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			before := tt.service["networks"]
+			preserveContainerNameAsAlias(tt.service)
+			after := tt.service["networks"]
+			if !reflect.DeepEqual(before, after) {
+				t.Fatalf("networks changed unexpectedly: before=%#v after=%#v", before, after)
+			}
+		})
+	}
+}
+
+func TestRemoveComposeConflictsPreservesAliasFromContainerName(t *testing.T) {
+	t.Parallel()
+
+	doc := &composeDocument{
+		Services: map[string]map[string]any{
+			"postgres": {
+				"container_name": "mercato-postgres-local",
+				"ports":          []any{"5432:5432"},
+				"networks":       []any{"mercato-network-fullapp"},
+			},
+		},
+		Networks: map[string]map[string]any{
+			"mercato-network-fullapp": {"name": "mercato-network-local", "driver": "bridge"},
+		},
+		Volumes: map[string]map[string]any{
+			"postgres_data": {"name": "mercato-postgres-data-local"},
+		},
+	}
+
+	removeComposeConflicts(doc)
+
+	svc := doc.Services["postgres"]
+	if _, ok := svc["container_name"]; ok {
+		t.Fatalf("container_name should be removed, got %#v", svc["container_name"])
+	}
+	if _, ok := svc["ports"]; ok {
+		t.Fatalf("ports should be removed, got %#v", svc["ports"])
+	}
+
+	wantNetworks := map[string]any{
+		"mercato-network-fullapp": map[string]any{"aliases": []any{"mercato-postgres-local"}},
+	}
+	if !reflect.DeepEqual(svc["networks"], wantNetworks) {
+		t.Fatalf("networks = %#v, want %#v", svc["networks"], wantNetworks)
+	}
+
+	if _, ok := doc.Networks["mercato-network-fullapp"]["name"]; ok {
+		t.Fatalf("network name should be stripped")
+	}
+	if _, ok := doc.Volumes["postgres_data"]["name"]; ok {
+		t.Fatalf("volume name should be stripped")
 	}
 }

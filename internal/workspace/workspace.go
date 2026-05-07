@@ -843,6 +843,92 @@ func attachProxyNetwork(service map[string]any) {
 	}
 }
 
+func preserveContainerNameAsAlias(service map[string]any) {
+	name, ok := service["container_name"].(string)
+	if !ok {
+		return
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+
+	const proxyNetwork = "proxy"
+
+	switch existing := service["networks"].(type) {
+	case nil:
+		return
+	case []any:
+		converted := make(map[string]any, len(existing))
+		for _, item := range existing {
+			netName, ok := item.(string)
+			if !ok || netName == "" {
+				continue
+			}
+			if netName == proxyNetwork {
+				converted[netName] = map[string]any{}
+				continue
+			}
+			converted[netName] = map[string]any{"aliases": []any{name}}
+		}
+		service["networks"] = converted
+	case []string:
+		converted := make(map[string]any, len(existing))
+		for _, netName := range existing {
+			if netName == "" {
+				continue
+			}
+			if netName == proxyNetwork {
+				converted[netName] = map[string]any{}
+				continue
+			}
+			converted[netName] = map[string]any{"aliases": []any{name}}
+		}
+		service["networks"] = converted
+	case map[string]any:
+		for netName, cfg := range existing {
+			if netName == proxyNetwork {
+				continue
+			}
+			cfgMap, _ := cfg.(map[string]any)
+			if cfgMap == nil {
+				cfgMap = map[string]any{}
+			}
+			cfgMap["aliases"] = appendUniqueAlias(cfgMap["aliases"], name)
+			existing[netName] = cfgMap
+		}
+	}
+}
+
+func appendUniqueAlias(existing any, alias string) []any {
+	switch v := existing.(type) {
+	case nil:
+		return []any{alias}
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok && s == alias {
+				return v
+			}
+		}
+		return append(v, alias)
+	case []string:
+		out := make([]any, 0, len(v)+1)
+		seen := false
+		for _, s := range v {
+			out = append(out, s)
+			if s == alias {
+				seen = true
+			}
+		}
+		if !seen {
+			out = append(out, alias)
+		}
+		return out
+	default:
+		return []any{alias}
+	}
+}
+
 func loadEnvironmentVariables(service map[string]any, envVars map[string]string) {
 	if len(envVars) == 0 {
 		return
@@ -1094,6 +1180,7 @@ func removeComposeConflicts(compose *composeDocument) {
 		if service == nil {
 			continue
 		}
+		preserveContainerNameAsAlias(service)
 		delete(service, "container_name")
 		delete(service, "ports")
 	}
