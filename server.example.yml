@@ -1,0 +1,45 @@
+server:
+  port: ":8090"
+  base_url: "https://prout.qa.acme.dev"
+  admin_secret: "change-me-admin-secret"
+
+db:
+  dsn: "postgres://prout:prout@localhost:5433/prout?sslmode=disable"
+
+log:
+  level: info
+  format: text
+  add_source: false
+
+github:
+  api_base_url: https://api.github.com
+  repository:
+    owner: acme-org
+    name: acme-platform
+    wildcard_domain: app.localhost
+
+    build_settings:
+      docker_compose_file_path: ./compose.yml
+      exposed_port: 8080
+      exposed_service_name: app
+      environment_variables:
+        CONTAINER_PORT: 6060
+        APP_PORT: 6060
+        DEPLOY_ENV: demo
+        NEXT_PUBLIC_UPGRADE_ACTIONS_ENABLED: true
+        UPGRADE_ACTIONS_ENABLED: true
+        SELF_SERVICE_ONBOARDING_ENABLED: true
+        ENABLE_CRUD_API_CACHE: true
+        DEMO_MODE: true
+        TENANT_DATA_ENCRYPTION_KEY: change-me-base64-encoded-32-byte-key
+        OM_INIT_SUPERADMIN_EMAIL: superadmin@acme.com
+        OM_INIT_SUPERADMIN_PASSWORD: secret
+
+environment:
+  name: development
+
+auth:
+  session_secret: "change-me-session-secret"
+  username: "login"
+  password: "password"
+  session_ttl: "12h"
